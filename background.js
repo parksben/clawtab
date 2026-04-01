@@ -23,6 +23,8 @@ const S = {
   ws: null, wsUrl: '', wsToken: '',
   wsConnected: false, pairingPending: false,
   wsReconnectDelay: 1000, wsReconnectTimer: null,
+  wsReconnectCount: 0,   // 连续失败次数
+  wsGaveUp: false,       // 超过3次，停止重连
   wsPendingConnectId: null, wsPendingNonce: null,
 
   // Identity
@@ -265,6 +267,7 @@ async function wsConnect(url,token,browserId) {
       S.wsPendingConnectId=null;
       if (msg.ok) {
         S.wsConnected=true; S.pairingPending=false; S.wsReconnectDelay=1000;
+        S.wsReconnectCount=0; S.wsGaveUp=false;
         clearTimeout(S.wsReconnectTimer);
         if (msg.payload?.auth?.deviceToken) {
           await chrome.storage.local.set({deviceToken:msg.payload.auth.deviceToken});
@@ -304,6 +307,16 @@ function wsDisconnect() {
 
 function wsScheduleReconnect() {
   if (!S.wsUrl||!S.wsToken) return;
+  S.wsReconnectCount++;
+  if (S.wsReconnectCount > 3) {
+    // 连续失败3次，停止重连，回退到配置界面
+    S.wsGaveUp = true;
+    S.wsUrl = ''; S.wsToken = '';
+    drawIcon('idle');
+    broadcastStatus();
+    console.warn('[ClawTab] 3 reconnect failures, giving up');
+    return;
+  }
   clearTimeout(S.wsReconnectTimer);
   S.wsReconnectTimer=setTimeout(()=>wsConnect(S.wsUrl,S.wsToken,S.browserId),S.wsReconnectDelay);
   S.wsReconnectDelay=Math.min(S.wsReconnectDelay*2,30000);

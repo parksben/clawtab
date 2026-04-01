@@ -23,6 +23,7 @@ const I18N = {
     pairingDesc: 'Send this pairing code to your OpenClaw agent to complete the setup:',
     pairingCmd: 'Or run on your Gateway:',
     switchLang: '切换中文',
+    connFailed: '连接失败，请检查配置',
     exportConfig: 'Export config…',
     importConfig: 'Import config…',
     exportSuccess: 'Config exported!',
@@ -56,6 +57,7 @@ const I18N = {
     pairingDesc: '将以下配对码发送给 OpenClaw Agent 完成绑定：',
     pairingCmd: '或在 Gateway 上运行：',
     switchLang: 'Switch to English',
+    connFailed: 'Connection failed — check config',
     exportConfig: '导出配置…',
     importConfig: '导入配置…',
     exportSuccess: '配置已导出！',
@@ -96,7 +98,7 @@ const DOT_CLASS = {
 // ── Main render ───────────────────────────────────────────────────────────
 function render(data) {
   lastData = data;
-  const { wsConnected, pairingPending, reconnecting, loop, browserId, wsUrl, tabCount } = data;
+  const { wsConnected, pairingPending, reconnecting, gaveUp, loop, browserId, wsUrl, tabCount } = data;
 
   // Status badge
   const loopStatus = loop?.status || 'idle';
@@ -111,10 +113,14 @@ function render(data) {
     })()
     : pairingPending ? t('pairingTitle')
     : reconnecting  ? t('connecting')
+    : gaveUp ? t('connFailed')
     : t('disconnected');
 
   // Config section: 未连接 且 不在重连中 才显示
   $('configSection').style.display = (wsConnected || reconnecting || pairingPending) ? 'none' : '';
+  // 3次重连失败后，显示错误提示
+  const retryTip = $('retryTip');
+  if (retryTip) retryTip.style.display = gaveUp ? '' : 'none';
 
   // Pairing banner
   if (pairingPending) {
