@@ -22,6 +22,12 @@ const I18N = {
     pairingTitle: '🔗 Pairing required',
     pairingDesc: 'Send this pairing code to your OpenClaw agent to complete the setup:',
     pairingCmd: 'Or run on your Gateway:',
+    switchLang: '切换中文',
+    exportConfig: 'Export config…',
+    importConfig: 'Import config…',
+    exportSuccess: 'Config copied to clipboard!',
+    importSuccess: 'Config imported!',
+    importError: 'Invalid config file',
     // loop status texts
     loopIdle: 'Ready — waiting for instructions',
     loopPerceiving: 'Capturing page snapshot…',
@@ -49,6 +55,12 @@ const I18N = {
     pairingTitle: '🔗 需要配对',
     pairingDesc: '将以下配对码发送给 OpenClaw Agent 完成绑定：',
     pairingCmd: '或在 Gateway 上运行：',
+    switchLang: 'Switch to English',
+    exportConfig: '导出配置…',
+    importConfig: '导入配置…',
+    exportSuccess: '配置已复制到剪贴板！',
+    importSuccess: '配置已导入！',
+    importError: '无效的配置文件',
     // loop status texts
     loopIdle: '就绪，等待指令',
     loopPerceiving: '正在截图并分析页面…',
@@ -304,12 +316,84 @@ $('cancelBtn').addEventListener('click', async () => {
 });
 
 // ── Lang toggle ───────────────────────────────────────────────────────────
-$('langBtn').addEventListener('click', async () => {
+// ── Settings menu ────────────────────────────────────────────────────────
+const settingsBtn = $('settingsBtn');
+const settingsMenu = $('settingsMenu');
+
+settingsBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const isOpen = settingsMenu.style.display !== 'none';
+  settingsMenu.style.display = isOpen ? 'none' : '';
+});
+
+document.addEventListener('click', () => {
+  settingsMenu.style.display = 'none';
+});
+
+// Lang toggle
+$('langToggle').addEventListener('click', async () => {
   lang = lang==='en' ? 'zh' : 'en';
   await chrome.storage.local.set({lang});
   applyI18n();
   if (lastData) render(lastData);
+  settingsMenu.style.display = 'none';
 });
+
+// Export config
+$('exportConfig').addEventListener('click', async () => {
+  const d = await chrome.storage.local.get(['gatewayUrl','gatewayToken','browserName']);
+  const cfg = { gatewayUrl: d.gatewayUrl||'', gatewayToken: d.gatewayToken||'', browserName: d.browserName||'', _clawtab: true };
+  const json = JSON.stringify(cfg, null, 2);
+  try {
+    await navigator.clipboard.writeText(json);
+    showToast(t('exportSuccess'));
+  } catch(_) {
+    // fallback: download file
+    const blob = new Blob([json], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'clawtab-config.json'; a.click();
+    URL.revokeObjectURL(url);
+  }
+  settingsMenu.style.display = 'none';
+});
+
+// Import config
+$('importConfig').addEventListener('click', () => {
+  $('importFile').click();
+  settingsMenu.style.display = 'none';
+});
+
+$('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0]; if (!file) return;
+  try {
+    const text = await file.text();
+    const cfg = JSON.parse(text);
+    if (!cfg._clawtab && !cfg.gatewayUrl) throw new Error('invalid');
+    const url = cfg.gatewayUrl||''; const token = cfg.gatewayToken||''; const name = cfg.browserName||'';
+    await chrome.storage.local.set({ gatewayUrl:url, gatewayToken:token, browserName:name,
+      gatewayUrlDraft:url, gatewayTokenDraft:token, browserNameDraft:name });
+    $('gatewayUrl').value = url;
+    $('gatewayToken').value = token;
+    $('browserName').value = name;
+    showToast(t('importSuccess'));
+  } catch(_) {
+    showToast(t('importError'), true);
+  }
+  e.target.value = '';
+});
+
+// ── Toast ────────────────────────────────────────────────────────────────
+function showToast(msg, isError=false) {
+  const el = document.createElement('div');
+  el.style.cssText = `position:fixed;bottom:12px;left:50%;transform:translateX(-50%);
+    background:${isError?'#fee2e2':'#f0fdf4'};color:${isError?'#b91c1c':'#15803d'};
+    padding:7px 14px;border-radius:8px;font-size:11px;font-weight:600;
+    box-shadow:0 2px 8px rgba(0,0,0,.12);z-index:999;white-space:nowrap;`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(()=>el.remove(), 2500);
+}
 
 // ── Fetch status ──────────────────────────────────────────────────────────
 async function fetchStatus() {
