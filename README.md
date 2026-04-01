@@ -34,7 +34,11 @@ The extension will always load with the fixed ID: `olfpncdbjlggonplhnlnbhkfiandd
 
 ## Gateway Configuration
 
-To allow ClawTab to connect, add its fixed origin to `gateway.controlUi.allowedOrigins` in your OpenClaw config:
+To allow ClawTab to connect, you need to:
+
+### 1. Enable token auth and whitelist the extension
+
+Edit your OpenClaw config (`~/.openclaw/openclaw.json`):
 
 ```json
 {
@@ -50,7 +54,19 @@ To allow ClawTab to connect, add its fixed origin to `gateway.controlUi.allowedO
 }
 ```
 
-> **Fixed ID:** Thanks to the `key` field in `manifest.json`, ClawTab always uses the same extension ID (`olfpncdbjlggonplhnlnbhkfianddhmp`) regardless of where or how many times you reinstall it. You only need to add it to `allowedOrigins` once.
+### 2. Restart the Gateway
+
+**Config changes only take effect after a full Gateway restart** — hot reload is not sufficient for `allowedOrigins` changes.
+
+```bash
+# If managed by systemd:
+systemctl restart openclaw-gateway.service
+
+# Or via CLI:
+openclaw gateway stop && openclaw gateway start
+```
+
+> **Fixed ID:** Thanks to the `key` field in `manifest.json`, ClawTab always uses the same extension ID (`olfpncdbjlggonplhnlnbhkfianddhmp`) regardless of where or how many times you reinstall it. You only need to add it to `allowedOrigins` once — no need to update config after reinstalling.
 
 ## Supported Commands
 
