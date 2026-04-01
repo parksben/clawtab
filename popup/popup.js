@@ -10,6 +10,8 @@ const I18N = {
     browserIdLabel: 'Browser ID', tabsLabel: 'Tabs',
     cancel: 'Cancel Task',
     idle: 'Ready',
+    connecting: 'Connecting…',
+    disconnected: 'Disconnected',
     perceiving: 'Analyzing page…',
     thinking: 'Thinking…',
     acting: 'Executing…',
@@ -35,6 +37,8 @@ const I18N = {
     browserIdLabel: '标识', tabsLabel: '标签页',
     cancel: '取消任务',
     idle: '就绪',
+    connecting: '连接中…',
+    disconnected: '未连接',
     perceiving: '分析页面中…',
     thinking: '思考中…',
     acting: '执行操作中…',
@@ -87,7 +91,9 @@ function render(data) {
   const dotClass = wsConnected ? (DOT_CLASS[loopStatus] || 'connected') : (pairingPending ? 'pairing' : '');
   $('statusDot').className = `status-dot ${dotClass}`;
   const statusKey = wsConnected ? loopStatus : (pairingPending ? 'pairing' : 'disconnected');
-  $('statusText').textContent = wsConnected ? (loop?.statusText || t(loopStatus)) : (pairingPending ? t('pairingMsg').slice(0,15)+'…' : '—');
+  $('statusText').textContent = wsConnected
+    ? (loop?.statusText || t('loop_' + loopStatus) || t(loopStatus) || loopStatus)
+    : pairingPending ? t('pairingTitle') : t('disconnected');
 
   // Config section: collapse when connected
   if (wsConnected && !configCollapsed) { collapseConfig(true); }
@@ -275,7 +281,7 @@ $('connectBtn').addEventListener('click', async () => {
   await chrome.storage.local.set({gatewayUrl:url,gatewayToken:token,browserName:name,
     gatewayUrlDraft:url,gatewayTokenDraft:token,browserNameDraft:name});
   $('connectBtn').disabled = true;
-  $('connectBtn').textContent = t('connecting') || 'Connecting…';
+  $('connectBtn').textContent = t('connecting');
   try { await chrome.runtime.sendMessage({type:'connect',url,token,name}); } catch(_){}
   setTimeout(async ()=>{ $('connectBtn').disabled=false; $('connectBtn').textContent=t('connect'); await fetchStatus(); },1500);
 });
