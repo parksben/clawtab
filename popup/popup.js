@@ -86,8 +86,19 @@ const t = k => I18N[lang]?.[k] || I18N.en[k] || k;
 
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
+  // 同步更新 statusText（用 data-status-key 记录当前 key）
+  const st = document.getElementById('statusText');
+  if (st && st.dataset.statusKey) st.textContent = t(st.dataset.statusKey);
   const _lb = document.getElementById('langToggle');
   if (_lb) _lb.textContent = lang === 'en' ? '切换中文' : 'Switch to English';
+}
+
+// 统一设置 statusText，记录 key 供语言切换时复用
+function setStatusText(key, fallback) {
+  const st = document.getElementById('statusText');
+  if (!st) return;
+  st.dataset.statusKey = key;
+  st.textContent = t(key) || fallback || key;
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
@@ -113,16 +124,17 @@ function render(data) {
   const dotClass = (wsConnected || reconnecting) ? (DOT_CLASS[loopStatus] || 'connected') : (pairingPending ? 'pairing' : 'disconnected');
   $('statusDot').className = `status-dot ${dotClass}`;
   const statusKey = wsConnected ? loopStatus : (pairingPending ? 'pairing' : 'disconnected');
-  $('statusText').textContent = wsConnected
-    ? (() => {
-      const keyMap = {idle:'loopIdle',perceiving:'loopPerceiving',thinking:'loopThinking',
-        acting:'loopActing',done:'loopDone',failed:'loopFailed',cancelled:'loopCancelled'};
-      return loop?.statusText || t(keyMap[loopStatus]) || loopStatus;
-    })()
-    : pairingPending ? t('pairingTitle')
-    : reconnecting  ? t('connecting')
-    : gaveUp ? t('connFailed')
-    : t('notConfigured');
+  if (wsConnected) {
+    const keyMap = {idle:'loopIdle',perceiving:'loopPerceiving',thinking:'loopThinking',
+      acting:'loopActing',done:'loopDone',failed:'loopFailed',cancelled:'loopCancelled'};
+    const key = keyMap[loopStatus] || 'loopIdle';
+    const custom = loop?.statusText;
+    const st = document.getElementById('statusText');
+    if (st) { st.dataset.statusKey = custom ? '' : key; st.textContent = custom || t(key) || loopStatus; }
+  } else {
+    const key = pairingPending ? 'pairingTitle' : reconnecting ? 'connecting' : gaveUp ? 'connFailed' : 'notConfigured';
+    setStatusText(key);
+  }
 
   // Config section: 未连接 且 不在重连中 才显示
   $('configSection').style.display = (wsConnected || reconnecting || pairingPending) ? 'none' : '';
@@ -284,12 +296,12 @@ function scheduleDraft() {
 async function loadConfig() {
   const d = await chrome.storage.local.get([
     'gatewayUrl','gatewayToken','browserName',
-    'gatewayUrlDraft','gatewayTokenDraft','browserNameDraft',
+    'gatewayUrlDraft','gatewayTokenDraft','browserNameDraft','lang',
   ]);
   $('gatewayUrl').value   = d.gatewayUrlDraft   || d.gatewayUrl   || '';
   $('gatewayToken').value = d.gatewayTokenDraft || d.gatewayToken || '';
   $('browserName').value  = d.browserNameDraft  || d.browserName  || '';
-  // 不持久化语言，每次默认英文
+  if (d.lang) lang = d.lang;
   applyI18n();
 }
 
@@ -351,7 +363,7 @@ document.addEventListener('click', (e) => {
 // Lang toggle
 $('langToggle').addEventListener('click', async () => {
   lang = lang==='en' ? 'zh' : 'en';
-  // lang 不写 storage，只在当次会话生效
+  await chrome.storage.local.set({lang});
   applyI18n();
   if (lastData) render(lastData);
   closeSettingsMenu();
@@ -444,11 +456,11 @@ chrome.runtime.onMessage.addListener(msg => {
     $('statsBar').style.display = 'none';
     $('loopSection').style.display = 'none';
     $('statusDot').className = 'status-dot pairing';
-    $('statusText').textContent = t('connecting');
+    setStatusText('connecting');
   } else {
     // 无配置：显示 notConfigured
     $('statusDot').className = 'status-dot disconnected';
-    $('statusText').textContent = t('notConfigured');
+    setStatusText('notConfigured');
   }
   // 实际状态 500ms 后从 background 拉取（给 SW 重连时间）
   setTimeout(fetchStatus, 500);
