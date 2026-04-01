@@ -337,13 +337,21 @@ const settingsMenu = $('settingsMenu');
 
 settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  settingsMenu.classList.toggle('open');
+  const isOpen = settingsMenu.getAttribute('data-open') === '1';
+  if (isOpen) {
+    settingsMenu.setAttribute('data-open', '0');
+    settingsMenu.style.display = 'none';
+  } else {
+    settingsMenu.setAttribute('data-open', '1');
+    settingsMenu.style.cssText = 'display:block!important;position:absolute;right:0;top:calc(100% + 6px);background:#fff;border-radius:10px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:160px;z-index:9999;border:1px solid #e2e8f0;';
+  }
 });
 
 settingsMenu.addEventListener('click', (e) => e.stopPropagation());
 
 document.addEventListener('click', () => {
-  settingsMenu.classList.remove('open');
+  settingsMenu.setAttribute('data-open', '0');
+  settingsMenu.style.display = 'none';
 });
 
 // Lang toggle
@@ -352,7 +360,7 @@ $('langToggle').addEventListener('click', async () => {
   await chrome.storage.local.set({lang});
   applyI18n();
   if (lastData) render(lastData);
-  settingsMenu.classList.remove('open');
+  settingsMenu.setAttribute('data-open','0'); settingsMenu.style.display='none';
 });
 
 // Export config
@@ -365,13 +373,13 @@ $('exportConfig').addEventListener('click', async () => {
   const a = document.createElement('a');
   a.href = url; a.download = 'clawtab-config.json'; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
-  settingsMenu.classList.remove('open');
+  settingsMenu.setAttribute('data-open','0'); settingsMenu.style.display='none';
 });
 
 // Import config
 $('importConfig').addEventListener('click', () => {
   $('importFile').click();
-  settingsMenu.classList.remove('open');
+  settingsMenu.setAttribute('data-open','0'); settingsMenu.style.display='none';
 });
 
 $('importFile').addEventListener('change', async (e) => {
