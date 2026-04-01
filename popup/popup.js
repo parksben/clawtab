@@ -104,6 +104,8 @@ const taskNameEl     = $('taskName');
 const taskStepsEl    = $('taskSteps');
 const cancelTaskBtn  = $('cancelTaskBtn');
 
+const occupiedBanner = $('occupiedBanner');
+
 // ── Task Panel ────────────────────────────────────────────────────────────
 
 const STEP_ICON = { running: '⏳', done: '✅', failed: '❌', pending: '○' };
@@ -267,6 +269,8 @@ async function fetchStatus() {
     const resp = await chrome.runtime.sendMessage({ type: 'get_status' });
     if (resp) updateStatusUI(resp.status, { wsUrl: resp.wsUrl, browserName: resp.browserName, tabCount: resp.tabCount, lastCommand: resp.lastCommand });
     if (resp?.currentTask) renderTask(resp.currentTask);
+    if (resp?.occupiedByAgent) { occupiedBanner.style.display = ''; occupiedBanner.textContent = `🔒 Occupied by agent: ${resp.occupiedByAgent}`; }
+    else { occupiedBanner.style.display = 'none'; }
   } catch (e) {
     updateStatusUI('disconnected');
   }
@@ -327,8 +331,10 @@ chrome.runtime.onMessage.addListener(msg => {
   if (msg.type === 'status_update') {
     updateStatusUI(msg.status, { wsUrl: msg.wsUrl, browserName: msg.browserName, tabCount: msg.tabCount, lastCommand: msg.lastCommand });
   }
-  if (msg.type === 'task_update') {
-    renderTask(msg.task);
+  if (msg.type === 'task_update') { renderTask(msg.task); }
+  if (msg.type === 'occupied_update') {
+    if (msg.agentId) { occupiedBanner.style.display = ''; occupiedBanner.textContent = `🔒 Occupied by agent: ${msg.agentId}`; }
+    else { occupiedBanner.style.display = 'none'; }
   }
 });
 

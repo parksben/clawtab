@@ -20,6 +20,7 @@ let tabCount = 0;
 
 // 当前任务状态
 let currentTask = null; // { id, name, agentId, steps[], currentStep, status, results[] }
+let occupiedByAgent = null; // 当前占用插件的 agentId
 
 // ── 图标 ──────────────────────────────────────────────────────────────────
 function drawIcon(connected) {
@@ -204,6 +205,9 @@ async function handleBrowserCheck(msg) {
   const tabs = await chrome.tabs.query({});
   const authorized = !selectedAgents || selectedAgents.includes(agentId);
 
+  // 检查是否被其他 agent 占用
+  const busy = occupiedByAgent && occupiedByAgent !== agentId;
+
   const snapshot = await Promise.all(
     tabs.filter(t => t.url && !t.url.startsWith('chrome')).slice(0, 10).map(async t => {
       let screenshot = null;
@@ -222,6 +226,8 @@ async function handleBrowserCheck(msg) {
     authorized,
     agentId,
     authorizedAgents: selectedAgents || 'all',
+    busy,
+    occupiedByAgent: busy ? occupiedByAgent : null,
     tabs: snapshot,
     totalTabs: tabs.length,
   });
@@ -234,44 +240,60 @@ async function handleTaskPlan(msg) {
   // 检查权限
   const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
   if (selectedAgents && !selectedAgents.includes(agentId)) {
-    send({ type: 'task_result', taskId, ok: false, error: `Agent "${agentId}" not authorized` });
+    send({ type: 'task_result', taskId, ok: false, error: `Agent "${agentId}" is not authorized to control this browser.` });
     return;
   }
 
-  currentTask = { id: taskId, name: taskName, agentId, steps, currentStep: 0, status: 'running', results: [] };
-  broadcastToPopup({ type: 'task_update', task: currentTask });
-
-  send({ type: 'task_started', taskId, taskName, stepCount: steps.length });
-
-  for (let i = 0; i < steps.length; i++) {
-    currentTask.currentStep = i;
-    broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
-
-    const step = steps[i];
-    let result;
-    try {
-      result = await executeStep(step);
-      currentTask.results.push({ step: i, ok: true, result });
-      send({ type: 'task_step_result', taskId, stepIndex: i, step, ok: true, result });
-    } catch (e) {
-      currentTask.results.push({ step: i, ok: false, error: e.message });
-      send({ type: 'task_step_result', taskId, stepIndex: i, step, ok: false, error: e.message });
-      if (step.abortOnError !== false) {
-        currentTask.status = 'failed';
-        broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
-        send({ type: 'task_result', taskId, ok: false, error: e.message, results: currentTask.results });
-        return;
-      }
-    }
-
-    broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+  // 互斥锁：检查是否被其他 agent 占用
+  if (occupiedByAgent && occupiedByAgent !== agentId) {
+    send({
+      type: 'task_result', taskId, ok: false,
+      error: `Browser is currently occupied by agent "${occupiedByAgent}". Task "${currentTask?.name || ''}" is in progress. Please try again later.`
+    });
+    return;
   }
 
-  currentTask.status = 'done';
-  broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
-  send({ type: 'task_result', taskId, ok: true, results: currentTask.results });
-  // 5s 后清空任务面板
-  setTimeout(() => { currentTask = null; broadcastToPopup({ type: 'task_update', task: null }); }, 5000);
+  // 加锁
+  occupiedByAgent = agentId;
+  broadcastToPopup({ type: 'occupied_update', agentId });
+
+  currentTask = { id: taskId, name: taskName, agentId, steps, currentStep: 0, status: 'running', results: [] };
+  broadcastToPopup({ type: 'task_update', task: currentTask });
+  send({ type: 'task_started', taskId, taskName, stepCount: steps.length });
+
+  try {
+    for (let i = 0; i < steps.length; i++) {
+      currentTask.currentStep = i;
+      broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+
+      const step = steps[i];
+      let result;
+      try {
+        result = await executeStep(step);
+        currentTask.results.push({ step: i, ok: true, result });
+        send({ type: 'task_step_result', taskId, stepIndex: i, step, ok: true, result });
+      } catch (e) {
+        currentTask.results.push({ step: i, ok: false, error: e.message });
+        send({ type: 'task_step_result', taskId, stepIndex: i, step, ok: false, error: e.message });
+        if (step.abortOnError !== false) {
+          currentTask.status = 'failed';
+          broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+          send({ type: 'task_result', taskId, ok: false, error: e.message, results: currentTask.results });
+          return;
+        }
+      }
+      broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+    }
+
+    currentTask.status = 'done';
+    broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+    send({ type: 'task_result', taskId, ok: true, results: currentTask.results });
+  } finally {
+    // 释放锁
+    occupiedByAgent = null;
+    broadcastToPopup({ type: 'occupied_update', agentId: null });
+    setTimeout(() => { currentTask = null; broadcastToPopup({ type: 'task_update', task: null }); }, 5000);
+  }
 }
 
 async function executeStep(step) {
@@ -324,6 +346,8 @@ function handleTaskCancel({ taskId }) {
     currentTask.status = 'cancelled';
     broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
     send({ type: 'task_result', taskId, ok: false, error: 'Cancelled by user' });
+    occupiedByAgent = null;
+    broadcastToPopup({ type: 'occupied_update', agentId: null });
     setTimeout(() => { currentTask = null; broadcastToPopup({ type: 'task_update', task: null }); }, 3000);
   }
 }
@@ -399,7 +423,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (ws) { try { ws.close(); } catch (_) {} ws = null; }
     isConnected = false; drawIcon(false); sendResponse({ ok: true });
   } else if (msg.type === 'get_status') {
-    sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl, browserName: wsBrowserName, currentTask });
+    sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl, browserName: wsBrowserName, currentTask, occupiedByAgent });
   } else if (msg.type === 'agents_list') {
     if (!isConnected || !ws) { sendResponse({ agents: [] }); return true; }
     const reqId = 'agents-' + Date.now();
