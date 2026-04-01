@@ -52,7 +52,79 @@ function drawIcon(connected) {
   chrome.action.setIcon({ imageData });
 }
 
+// ── Device Identity（Ed25519，与 PinchChat 协议一致）──────────────────────
+const DB_NAME = 'clawtab-device', DB_VERSION = 1, STORE = 'identity';
+
+function openDB() {
+  return new Promise((res, rej) => {
+    const r = indexedDB.open(DB_NAME, DB_VERSION);
+    r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains(STORE)) r.result.createObjectStore(STORE); };
+    r.onsuccess = () => res(r.result);
+    r.onerror = () => rej(r.error);
+  });
+}
+
+function dbGet(db, key) {
+  return new Promise((res, rej) => { const r = db.transaction(STORE,'readonly').objectStore(STORE).get(key); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+}
+
+function dbPut(db, key, val) {
+  return new Promise((res, rej) => { const r = db.transaction(STORE,'readwrite').objectStore(STORE).put(val, key); r.onsuccess = () => res(); r.onerror = () => rej(r.error); });
+}
+
+function ab2b64url(ab) {
+  let s = ''; new Uint8Array(ab).forEach(b => s += String.fromCharCode(b));
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+
+async function getOrCreateDeviceIdentity() {
+  try {
+    const db = await openDB();
+    const saved = await dbGet(db, 'device');
+    if (saved?.version === 1) {
+      const priv = await crypto.subtle.importKey('jwk', saved.jwkPrivate, { name: 'Ed25519' }, true, ['sign']);
+      const pub  = await crypto.subtle.importKey('jwk', saved.jwkPublic,  { name: 'Ed25519' }, true, ['verify']);
+      db.close();
+      return { id: saved.deviceId, publicKeyRaw: saved.publicKeyRaw, keyPair: { privateKey: priv, publicKey: pub } };
+    }
+    // 新建
+    const kp = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+    const spki = await crypto.subtle.exportKey('spki', kp.publicKey);
+    const pubBytes = spki.slice(12);
+    const pubRaw = ab2b64url(pubBytes);
+    const hashBuf = await crypto.subtle.digest('SHA-256', pubBytes);
+    const deviceId = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2,'0')).join('');
+    const jwkPub  = await crypto.subtle.exportKey('jwk', kp.publicKey);
+    const jwkPriv = await crypto.subtle.exportKey('jwk', kp.privateKey);
+    await dbPut(db, 'device', { version: 1, deviceId, publicKeyRaw: pubRaw, jwkPublic: jwkPub, jwkPrivate: jwkPriv });
+    db.close();
+    return { id: deviceId, publicKeyRaw: pubRaw, keyPair: kp };
+  } catch (e) {
+    console.warn('[ClawTab] device identity error:', e);
+    return null;
+  }
+}
+
+async function signDevicePayload(privateKey, payload) {
+  const enc = new TextEncoder().encode(payload);
+  const sig = await crypto.subtle.sign('Ed25519', privateKey, enc);
+  return ab2b64url(sig);
+}
+
+function buildDevicePayload({ deviceId, token, role, scopes, signedAtMs, nonce }) {
+  const v = nonce ? 'v2' : 'v1';
+  const parts = [v, deviceId, 'webchat', 'webchat', role, scopes.join(','), String(signedAtMs), token || ''];
+  if (nonce) parts.push(nonce);
+  return parts.join('|');
+}
+
 // ── WebSocket 管理 ────────────────────────────────────────────────────────
+let deviceIdentity = null;
+let pendingNonce = null;
+
+// 预加载 device identity
+getOrCreateDeviceIdentity().then(id => { deviceIdentity = id; });
+
 function connect(url, token, name) {
   if (ws) {
     ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
@@ -67,8 +139,10 @@ function connect(url, token, name) {
   }
 
   ws.onopen = () => {
+    // 先发 connect req，Gateway 会回 connect.challenge（含 nonce），再签名
     const connectId = 'connect-' + Date.now();
     pendingConnectId = connectId;
+    pendingNonce = null;
     ws.send(JSON.stringify({
       type: 'req', id: connectId, method: 'connect',
       params: {
@@ -88,6 +162,32 @@ function connect(url, token, name) {
     let msg;
     try { msg = JSON.parse(event.data); } catch { return; }
 
+    // connect.challenge — 收到 nonce，重新发带签名的 connect
+    if (msg.type === 'event' && msg.event === 'connect.challenge') {
+      pendingNonce = msg.payload?.nonce || null;
+      if (deviceIdentity && pendingNonce) {
+        const connectId = pendingConnectId;
+        const role = 'operator';
+        const scopes = ['operator.read', 'operator.write', 'operator.admin', 'operator.approvals'];
+        const signedAtMs = Date.now();
+        const payload = buildDevicePayload({ deviceId: deviceIdentity.id, token: wsToken, role, scopes, signedAtMs, nonce: pendingNonce });
+        const signature = await signDevicePayload(deviceIdentity.keyPair.privateKey, payload);
+        ws.send(JSON.stringify({
+          type: 'req', id: connectId, method: 'connect',
+          params: {
+            minProtocol: 3, maxProtocol: 3,
+            client: { id: 'webchat', version: '1.71.3', platform: 'web', mode: 'webchat' },
+            role, scopes, caps: [], commands: [], permissions: {},
+            auth: { token: wsToken },
+            device: { id: deviceIdentity.id, publicKey: deviceIdentity.publicKeyRaw, signature, signedAt: signedAtMs, nonce: pendingNonce },
+            locale: 'zh-CN',
+            userAgent: `clawtab/${VERSION}${wsBrowserName ? ' (' + wsBrowserName + ')' : ''}`
+          }
+        }));
+      }
+      return;
+    }
+
     // 握手响应
     if (msg.type === 'res' && msg.id === pendingConnectId) {
       pendingConnectId = null;
@@ -98,7 +198,6 @@ function connect(url, token, name) {
         setStatus('connected');
         drawIcon(true);
         reportTabs();
-        // 连接后向 Gateway 上报浏览器信息
         sendBrowserInfo();
       } else {
         const code = msg.payload?.code || msg.error?.code || '';
@@ -108,18 +207,12 @@ function connect(url, token, name) {
       return;
     }
 
-    if (msg.type === 'event' && msg.event === 'connect.challenge') return;
-
-    // 处理指令
     if (msg.type === 'event') {
       const payload = msg.payload || msg;
       const agentId = payload.agentId || msg.agentId;
       if (agentId) {
         const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
-        if (selectedAgents && !selectedAgents.includes(agentId)) {
-          console.log(`[ClawTab] Blocked from agent "${agentId}"`);
-          return;
-        }
+        if (selectedAgents && !selectedAgents.includes(agentId)) return;
       }
       await handleCommand(payload);
       return;
