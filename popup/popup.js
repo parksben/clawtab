@@ -85,20 +85,20 @@ let lang = 'en';
 const t = k => I18N[lang]?.[k] || I18N.en[k] || k;
 
 function applyI18n() {
-  document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
-  // 同步更新 statusText（用 data-status-key 记录当前 key）
-  const st = document.getElementById('statusText');
-  if (st && st.dataset.statusKey) st.textContent = t(st.dataset.statusKey);
+  // 所有 data-i18n 元素统一翻译（包括 statusText）
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
   const _lb = document.getElementById('langToggle');
   if (_lb) _lb.textContent = lang === 'en' ? '切换中文' : 'Switch to English';
 }
 
-// 统一设置 statusText，记录 key 供语言切换时复用
-function setStatusText(key, fallback) {
+// 设置 statusText：更新 data-i18n key 并立即翻译
+function setStatusText(key) {
   const st = document.getElementById('statusText');
   if (!st) return;
-  st.dataset.statusKey = key;
-  st.textContent = t(key) || fallback || key;
+  st.dataset.i18n = key;
+  st.textContent = t(key);
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
@@ -451,17 +451,16 @@ chrome.runtime.onMessage.addListener(msg => {
   // 先检查是否有保存配置，有则先显示 connecting（等 SW 重连）
   const saved = await chrome.storage.local.get(['gatewayUrl','gatewayToken']);
   if (saved.gatewayUrl && saved.gatewayToken) {
-    // 有配置：先显示 connecting 占位
     $('configSection').style.display = 'none';
     $('statsBar').style.display = 'none';
     $('loopSection').style.display = 'none';
     $('statusDot').className = 'status-dot pairing';
-    setStatusText('connecting');
+    setStatusText('connecting');  // data-i18n='connecting', applyI18n 会用正确语言翻译
   } else {
-    // 无配置：显示 notConfigured
     $('statusDot').className = 'status-dot disconnected';
-    setStatusText('notConfigured');
+    setStatusText('notConfigured');  // data-i18n='notConfigured'
   }
+  // loadConfig 已经调用了 applyI18n，statusText 会被正确翻译
   // 实际状态 500ms 后从 background 拉取（给 SW 重连时间）
   setTimeout(fetchStatus, 500);
 })();
