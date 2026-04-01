@@ -289,7 +289,15 @@ async function wsConnect(url,token,browserId) {
         // 不在连接时自动截图，截图只在任务执行中更新
       } else {
         const code=msg.payload?.code||'';
-        if (code==='NOT_PAIRED') { S.pairingPending=true; drawIcon('connecting'); broadcastStatus(); }
+        if (code==='NOT_PAIRED') {
+          S.pairingPending=true;
+          clearTimeout(S.wsReconnectTimer);
+          drawIcon('connecting'); broadcastStatus();
+          // 每5s 自动重试，直到配对成功
+          S.wsReconnectTimer = setTimeout(() => {
+            if (S.pairingPending) wsConnect(S.wsUrl, S.wsToken, S.browserId);
+          }, 5000);
+        }
         else wsScheduleReconnect();
       }
       return;
@@ -306,10 +314,12 @@ async function wsConnect(url,token,browserId) {
       sendResult({cmdId:S.loop.cmdId,ok:false,error:'Connection lost',errorCode:'DISCONNECTED'});
     }
     stopPolling();
+    // 配对等待中：不重连、不更新UI（已经显示配对码了）
+    if (S.pairingPending) return;
     // 断线保护：延迟 1.5s 再更新 UI，避免短暂断线引起界面闪烁
     clearTimeout(S.wsDisconnectTimer);
     S.wsDisconnectTimer = setTimeout(() => {
-      if (!S.wsConnected) {  // 1.5s 内没有重连成功才更新 UI
+      if (!S.wsConnected && !S.pairingPending) {
         drawIcon(S.wsGaveUp ? 'idle' : 'connecting');
         broadcastStatus();
       }
