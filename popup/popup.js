@@ -284,12 +284,12 @@ function scheduleDraft() {
 async function loadConfig() {
   const d = await chrome.storage.local.get([
     'gatewayUrl','gatewayToken','browserName',
-    'gatewayUrlDraft','gatewayTokenDraft','browserNameDraft','lang',
+    'gatewayUrlDraft','gatewayTokenDraft','browserNameDraft',
   ]);
   $('gatewayUrl').value   = d.gatewayUrlDraft   || d.gatewayUrl   || '';
   $('gatewayToken').value = d.gatewayTokenDraft || d.gatewayToken || '';
   $('browserName').value  = d.browserNameDraft  || d.browserName  || '';
-  if (d.lang) lang = d.lang;
+  // 不持久化语言，每次默认英文
   applyI18n();
 }
 
@@ -351,7 +351,7 @@ document.addEventListener('click', (e) => {
 // Lang toggle
 $('langToggle').addEventListener('click', async () => {
   lang = lang==='en' ? 'zh' : 'en';
-  await chrome.storage.local.set({lang});
+  // lang 不写 storage，只在当次会话生效
   applyI18n();
   if (lastData) render(lastData);
   closeSettingsMenu();
