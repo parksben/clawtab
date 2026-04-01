@@ -86,7 +86,7 @@ const t = k => I18N[lang]?.[k] || I18N.en[k] || k;
 
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
-  $('langBtn').textContent = lang === 'en' ? '中文' : 'EN';
+  const _lb = document.getElementById('langToggle'); if(_lb) _lb.textContent = lang==='en' ? t('switchLang') : t('switchLang');
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
@@ -94,7 +94,6 @@ const $ = id => document.getElementById(id);
 
 // ── State ─────────────────────────────────────────────────────────────────
 let lastData = null;
-let configCollapsed = false;
 
 // ── Status dot mapping ────────────────────────────────────────────────────
 const DOT_CLASS = {
@@ -253,9 +252,6 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
-  configCollapsed = collapse;
-  $('configBody').style.display = collapse ? 'none' : '';
-}
 
 // ── Config collapse toggle ────────────────────────────────────────────────
 
