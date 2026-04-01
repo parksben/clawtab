@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vivian Browser Agent</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <!-- Header -->
+  <div class="header">
+    <div class="brand">
+      <span class="brand-icon">🤖</span>
+      <div class="brand-text">
+        <span class="brand-name">Vivian</span>
+        <span class="brand-sub">Browser Agent</span>
+      </div>
+    </div>
+    <div class="status-badge" id="statusBadge">
+      <span class="status-dot" id="statusDot"></span>
+      <span class="status-text" id="statusText">未连接</span>
+    </div>
+  </div>
+
+  <!-- Config Section -->
+  <div class="section">
+    <div class="section-title">连接配置</div>
+    <div class="form-group">
+      <label for="gatewayUrl">Gateway URL</label>
+      <input
+        type="text"
+        id="gatewayUrl"
+        placeholder="ws://localhost:3000/browser-agent"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+    <div class="form-group">
+      <label for="gatewayToken">Access Token</label>
+      <div class="input-row">
+        <input
+          type="password"
+          id="gatewayToken"
+          placeholder="your-secret-token"
+          autocomplete="off"
+        />
+        <button class="icon-btn" id="toggleToken" title="显示/隐藏 Token">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="connectBtn">保存并连接</button>
+      <button class="btn btn-secondary" id="disconnectBtn">断开</button>
+    </div>
+  </div>
+
+  <!-- Stats Section -->
+  <div class="section">
+    <div class="section-title">运行状态</div>
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="stat-label">Gateway</div>
+        <div class="stat-value" id="statGateway">—</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-label">监控标签页</div>
+        <div class="stat-value" id="statTabs">0</div>
+      </div>
+    </div>
+    <div class="last-cmd">
+      <span class="stat-label">最后指令：</span>
+      <span class="stat-value cmd-value" id="statLastCmd">—</span>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    🤖 Vivian · Powered by <span class="highlight">OpenClaw</span>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
