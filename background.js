@@ -235,7 +235,8 @@ async function wsConnect(url,token,browserId) {
       locale:'zh-CN',
       userAgent:`clawtab/${VERSION}${browserId?' ('+browserId+')':''}`,
     };
-    if (S.deviceIdentity) params.device={id:S.deviceIdentity.id,publicKey:S.deviceIdentity.publicKeyRaw};
+    // 初始 connect 不带 device 字段——等 challenge 来了再签名重发
+    // (带不完整的 device 会触发 schema 校验失败)
     wsSend({type:'req',id:cid,method:'connect',params});
   };
 
