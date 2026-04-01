@@ -27,6 +27,7 @@ const I18N = {
     pairingCopy: '已复制！',
     cancel: '取消',
     connFailed: '连接失败，请检查配置',
+    notConfigured: '未配置',
     exportConfig: 'Export config…',
     importConfig: 'Import config…',
     exportSuccess: 'Config exported!',
@@ -64,6 +65,7 @@ const I18N = {
     pairingCopy: 'Copied!',
     cancel: 'Cancel',
     connFailed: 'Connection failed — check config',
+    notConfigured: 'Not configured',
     exportConfig: '导出配置…',
     importConfig: '导入配置…',
     exportSuccess: '配置已导出！',
@@ -120,7 +122,7 @@ function render(data) {
     : pairingPending ? t('pairingTitle')
     : reconnecting  ? t('connecting')
     : gaveUp ? t('connFailed')
-    : t('disconnected');
+    : (wsUrl || browserId) ? t('disconnected') : t('notConfigured');
 
   // Config section: 未连接 且 不在重连中 才显示
   $('configSection').style.display = (wsConnected || reconnecting || pairingPending) ? 'none' : '';
@@ -336,8 +338,11 @@ const settingsMenu = $('settingsMenu');
 settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation();
   const isOpen = settingsMenu.style.display !== 'none';
-  settingsMenu.style.display = isOpen ? 'none' : '';
+  settingsMenu.style.display = isOpen ? 'none' : 'block';
 });
+
+// 点菜单内的项不关闭（由各项自己关）
+settingsMenu.addEventListener('click', (e) => e.stopPropagation());
 
 document.addEventListener('click', () => {
   settingsMenu.style.display = 'none';
@@ -434,12 +439,16 @@ chrome.runtime.onMessage.addListener(msg => {
   // 先检查是否有保存配置，有则先显示 connecting（等 SW 重连）
   const saved = await chrome.storage.local.get(['gatewayUrl','gatewayToken']);
   if (saved.gatewayUrl && saved.gatewayToken) {
-    // 有配置：先渲染 connecting 占位，避免闪现配置面板
+    // 有配置：先显示 connecting 占位
     $('configSection').style.display = 'none';
     $('statsBar').style.display = 'none';
     $('loopSection').style.display = 'none';
     $('statusDot').className = 'status-dot pairing';
     $('statusText').textContent = t('connecting');
+  } else {
+    // 无配置：显示 notConfigured
+    $('statusDot').className = 'status-dot disconnected';
+    $('statusText').textContent = t('notConfigured');
   }
   // 实际状态 500ms 后从 background 拉取（给 SW 重连时间）
   setTimeout(fetchStatus, 500);
