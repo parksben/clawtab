@@ -30,7 +30,7 @@
       <input
         type="text"
         id="gatewayUrl"
-        placeholder="ws://localhost:3000/browser-agent"
+        placeholder="wss://ui.parksben.xyz"
         autocomplete="off"
         spellcheck="false"
       />
@@ -41,7 +41,7 @@
         <input
           type="password"
           id="gatewayToken"
-          placeholder="your-secret-token"
+          placeholder="your-gateway-token"
           autocomplete="off"
         />
         <button class="icon-btn" id="toggleToken" title="显示/隐藏 Token">
@@ -55,6 +55,17 @@
     <div class="btn-row">
       <button class="btn btn-primary" id="connectBtn">保存并连接</button>
       <button class="btn btn-secondary" id="disconnectBtn">断开</button>
+    </div>
+  </div>
+
+  <!-- Agent 选择区（连接后展示） -->
+  <div class="section" id="agentSection" style="display:none;">
+    <div class="section-title">
+      监控 Agent
+      <span class="section-hint">选择哪些 Agent 可以控制浏览器</span>
+    </div>
+    <div id="agentList" class="agent-list">
+      <div class="agent-loading">加载中…</div>
     </div>
   </div>
 

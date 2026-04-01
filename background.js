@@ -417,6 +417,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'connect') {
     connect(msg.url, msg.token);
     sendResponse({ ok: true });
+
   } else if (msg.type === 'disconnect') {
     clearTimeout(reconnectTimer);
     wsUrl = null;
@@ -428,10 +429,40 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     isConnected = false;
     drawIcon(false);
     sendResponse({ ok: true });
+
   } else if (msg.type === 'get_status') {
     sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl });
+
+  } else if (msg.type === 'agents_list') {
+    // 通过 Gateway 获取 agents 列表
+    if (!isConnected || !ws) {
+      sendResponse({ agents: [] });
+      return true;
+    }
+    const reqId = 'agents-' + Date.now();
+    const timer = setTimeout(() => sendResponse({ agents: [] }), 5000);
+    const handler = (event) => {
+      try {
+        const m = JSON.parse(event.data);
+        if (m.type === 'res' && m.id === reqId) {
+          ws.removeEventListener('message', handler);
+          clearTimeout(timer);
+          const agents = (m.payload?.agents || []).map(a => a.id || a.agentId).filter(Boolean);
+          sendResponse({ agents });
+        }
+      } catch (_) {}
+    };
+    ws.addEventListener('message', handler);
+    ws.send(JSON.stringify({ type: 'req', id: reqId, method: 'agents.list', params: {} }));
+    return true; // 异步响应
+
+  } else if (msg.type === 'update_selected_agents') {
+    // popup 更新选中 agent，直接存储（background 读取时用）
+    chrome.storage.local.set({ selectedAgents: msg.agents });
+    sendResponse({ ok: true });
   }
-  return true; // 保持异步响应
+
+  return true;
 });
 
 // 标签页变化时更新计数
