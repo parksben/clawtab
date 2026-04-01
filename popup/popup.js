@@ -134,12 +134,7 @@ function setStatus(key, customText) {
 let lastData = null;
 
 function render(data) {
-  // 去抖：核心状态没变化就不重渲染，避免闪烁
-  const key = `${data.wsConnected}|${data.pairingPending}|${data.reconnecting}|${data.gaveUp}|${data.loop?.status}`;
-  if (lastData && key === `${lastData.wsConnected}|${lastData.pairingPending}|${lastData.reconnecting}|${lastData.gaveUp}|${lastData.loop?.status}`) {
-    lastData = data; // 仍然更新数据（比如截图），但不重绘 DOM
-    return;
-  }
+  // UI 完全由 background 状态机驱动，background 只在状态变化时 broadcastStatus
   lastData = data;
   const { wsConnected, pairingPending, reconnecting, gaveUp, deviceId,
           loop, browserId, wsUrl, tabCount } = data;

@@ -221,9 +221,10 @@ function resolvePending(id,msg) {
 }
 
 async function wsConnect(url,token,browserId) {
-  wsDisconnect();
+  wsDisconnect(); // 静默关闭旧连接，不触发 onclose 回调
   S.wsUrl=url; S.wsToken=token; S.browserId=browserId;
   S.sessionKey=`agent:main:clawtab-${browserId}`;
+  S.wsReconnectCount=0; S.wsGaveUp=false; S.wsReconnectDelay=1000; // 重置重试状态
   drawIcon('connecting'); broadcastStatus();
 
   try { S.ws=new WebSocket(url); } catch(e) { wsScheduleReconnect(); return; }
@@ -318,9 +319,14 @@ async function wsConnect(url,token,browserId) {
 }
 
 function wsDisconnect() {
-  clearTimeout(S.wsReconnectTimer); stopPolling();
-  if (S.ws){try{S.ws.close();}catch(_){} S.ws=null;}
-  S.wsConnected=false;
+  clearTimeout(S.wsReconnectTimer); clearTimeout(S.wsDisconnectTimer); stopPolling();
+  if (S.ws) {
+    // 静默关闭：先清掉回调再 close，避免触发 onclose → wsScheduleReconnect
+    S.ws.onclose = null; S.ws.onerror = null; S.ws.onmessage = null;
+    try { S.ws.close(); } catch(_) {}
+    S.ws = null;
+  }
+  S.wsConnected = false;
 }
 
 function wsScheduleReconnect() {
