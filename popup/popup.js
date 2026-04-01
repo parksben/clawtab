@@ -86,7 +86,8 @@ const t = k => I18N[lang]?.[k] || I18N.en[k] || k;
 
 function applyI18n() {
   document.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.dataset.i18n); });
-  const _lb = document.getElementById('langToggle'); if(_lb) _lb.textContent = lang==='en' ? t('switchLang') : t('switchLang');
+  const _lb = document.getElementById('langToggle');
+  if (_lb) _lb.textContent = lang === 'en' ? '切换中文' : 'Switch to English';
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
