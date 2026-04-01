@@ -179,7 +179,7 @@ function render(data) {
     if (hasTask) { show('loopSection'); renderLoop(loop); }
     else          hide('loopSection');
     // Header
-    hide('brandArea'); show('disconnectInlineBtn');
+    show('brandArea'); show('disconnectInlineBtn');
   } else if (pairingPending) {
     hide('configSection'); show('pairingSection');
     hide('statsBar'); hide('loopSection');
