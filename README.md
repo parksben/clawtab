@@ -10,6 +10,7 @@
 - ⚡ **Execute JS** — agents can run scripts, click elements, fill forms, and navigate pages
 - 🏷️ **Browser identity** — set a custom name so the Gateway knows which browser is connected
 - 💾 **Auto-save** — URL, token, and browser name are remembered across sessions
+- 📌 **Fixed extension ID** — the `key` field in `manifest.json` pins the extension ID, so you never need to update Gateway config after reinstalling
 
 ## Installation
 
@@ -18,6 +19,8 @@
 3. Open Chrome and go to `chrome://extensions/`
 4. Enable **Developer mode** (top-right toggle)
 5. Click **Load unpacked** and select the unzipped folder
+
+The extension will always load with the fixed ID: `olfpncdbjlggonplhnlnbhkfianddhmp`
 
 ## Setup
 
@@ -31,7 +34,7 @@
 
 ## Gateway Configuration
 
-To allow ClawTab to connect, add your extension's origin to `gateway.controlUi.allowedOrigins` in your OpenClaw config:
+To allow ClawTab to connect, add its fixed origin to `gateway.controlUi.allowedOrigins` in your OpenClaw config:
 
 ```json
 {
@@ -40,14 +43,14 @@ To allow ClawTab to connect, add your extension's origin to `gateway.controlUi.a
     "controlUi": {
       "allowedOrigins": [
         "http://localhost:18789",
-        "chrome-extension://<your-extension-id>"
+        "chrome-extension://olfpncdbjlggonplhnlnbhkfianddhmp"
       ]
     }
   }
 }
 ```
 
-> **Finding your extension ID:** Go to `chrome://extensions/` and look for the ID shown under ClawTab.
+> **Fixed ID:** Thanks to the `key` field in `manifest.json`, ClawTab always uses the same extension ID (`olfpncdbjlggonplhnlnbhkfianddhmp`) regardless of where or how many times you reinstall it. You only need to add it to `allowedOrigins` once.
 
 ## Supported Commands
 

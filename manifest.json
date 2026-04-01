@@ -3,6 +3,7 @@
   "name": "ClawTab",
   "version": "1.0.0",
   "description": "Connect your browser to an OpenClaw Gateway, enabling AI agents to observe and control browser tabs.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxCy1EtSUS94u0Z++ojTJYriP6D3zndf1EjywSHGqANvN62F6XLBPBwSwZrhgnh42Q0dlhDqgSiZOKNUHAoDXg93jJXpcelHG+3URZGz29uLGue2RGQ+HNmAJNxD9rNdhfqpA0K95k8lmRr48SxEK9Uafu0hI+dyWJz0ahXo/VM15dkl8Ex0eMWgoBTo4JOZVAaK6POy5xyWU8pqDMkjTJ8wKHtENm4DUaYqG7zLKPJh+mrlUGVhemlE5p7jXOA+SZDWRx+kUiUrwTTS0Lu2BnauaJ3s1E+1OlBCgTTaY+zRhLWhjHt93wPH5x92wuAHuo3yttJVhjPo0xaIMt8N3+wIDAQAB",
   "permissions": [
     "tabs",
     "activeTab",
