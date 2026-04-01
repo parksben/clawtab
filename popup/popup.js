@@ -129,8 +129,13 @@ function render(data) {
       acting:'loopActing',done:'loopDone',failed:'loopFailed',cancelled:'loopCancelled'};
     const key = keyMap[loopStatus] || 'loopIdle';
     const custom = loop?.statusText;
-    const st = document.getElementById('statusText');
-    if (st) { st.dataset.statusKey = custom ? '' : key; st.textContent = custom || t(key) || loopStatus; }
+    if (custom) {
+      // 动态文字（如 "Clicking #btn"），不走 i18n
+      const st = document.getElementById('statusText');
+      if (st) { st.dataset.i18n = ''; st.textContent = custom; }
+    } else {
+      setStatusText(key);  // 走 data-i18n，语言切换时自动更新
+    }
   } else {
     const key = pairingPending ? 'pairingTitle' : reconnecting ? 'connecting' : gaveUp ? 'connFailed' : 'notConfigured';
     setStatusText(key);
