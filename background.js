@@ -877,6 +877,7 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         sendResponse({ok:true}); break;
       case 'get_status':
         sendResponse({wsConnected:S.wsConnected,pairingPending:S.pairingPending,
+          reconnecting: !S.wsConnected && !!S.wsUrl,  // 有配置但未连接 = 正在重连
           deviceId:S.deviceIdentity?.id||'',
           browserId:S.browserId,
           wsUrl:S.wsUrl,tabCount:S.tabCount,lastCmd:S.lastCmd,loop:{

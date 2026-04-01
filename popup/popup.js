@@ -96,7 +96,7 @@ const DOT_CLASS = {
 // ── Main render ───────────────────────────────────────────────────────────
 function render(data) {
   lastData = data;
-  const { wsConnected, pairingPending, loop, browserId, wsUrl, tabCount } = data;
+  const { wsConnected, pairingPending, reconnecting, loop, browserId, wsUrl, tabCount } = data;
 
   // Status badge
   const loopStatus = loop?.status || 'idle';
@@ -109,10 +109,12 @@ function render(data) {
         acting:'loopActing',done:'loopDone',failed:'loopFailed',cancelled:'loopCancelled'};
       return loop?.statusText || t(keyMap[loopStatus]) || loopStatus;
     })()
-    : pairingPending ? t('pairingTitle') : t('disconnected');
+    : pairingPending ? t('pairingTitle')
+    : reconnecting  ? t('connecting')
+    : t('disconnected');
 
-  // Config section: collapse when connected
-  $('configSection').style.display = wsConnected ? 'none' : '';
+  // Config section: 未连接 且 不在重连中 才显示
+  $('configSection').style.display = (wsConnected || reconnecting || pairingPending) ? 'none' : '';
 
   // Pairing banner
   if (pairingPending) {
@@ -139,9 +141,10 @@ function render(data) {
     $('pairingBanner').style.display = 'none';
   }
 
-  // Loop section
+  // Loop section: 只在任务执行中显示（非 idle）
   const loopEl = $('loopSection');
-  if (wsConnected) {
+  const hasTask = wsConnected && loop?.status && loop.status !== 'idle';
+  if (hasTask) {
     loopEl.style.display = '';
     renderLoop(loop);
   } else {
@@ -150,7 +153,7 @@ function render(data) {
 
   // Stats bar
   const statsBar = $('statsBar');
-  if (wsConnected) {
+  if (wsConnected || reconnecting) {
     statsBar.style.display = '';
     let gw = '—';
     try { gw = new URL(wsUrl).host; } catch(_) { gw = wsUrl || '—'; }
@@ -412,5 +415,16 @@ chrome.runtime.onMessage.addListener(msg => {
 // ── Init ──────────────────────────────────────────────────────────────────
 (async () => {
   await loadConfig();
-  await fetchStatus();
+  // 先检查是否有保存配置，有则先显示 connecting（等 SW 重连）
+  const saved = await chrome.storage.local.get(['gatewayUrl','gatewayToken']);
+  if (saved.gatewayUrl && saved.gatewayToken) {
+    // 有配置：先渲染 connecting 占位，避免闪现配置面板
+    $('configSection').style.display = 'none';
+    $('statsBar').style.display = 'none';
+    $('loopSection').style.display = 'none';
+    $('statusDot').className = 'status-dot pairing';
+    $('statusText').textContent = t('connecting');
+  }
+  // 实际状态 500ms 后从 background 拉取（给 SW 重连时间）
+  setTimeout(fetchStatus, 500);
 })();
