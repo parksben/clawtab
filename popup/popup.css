@@ -260,6 +260,12 @@ input::placeholder {
   max-width: 200px;
 }
 
+.label-hint {
+  font-size: 10px;
+  color: #475569;
+  font-weight: normal;
+}
+
 /* ─── Agent 选择 ─── */
 .section-hint {
   font-size: 10px;

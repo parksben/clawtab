@@ -11,7 +11,9 @@ const gatewayTokenInput = $('gatewayToken');
 const connectBtn = $('connectBtn');
 const disconnectBtn = $('disconnectBtn');
 const toggleTokenBtn = $('toggleToken');
+const browserNameInput = $('browserName');
 const statGateway = $('statGateway');
+const statBrowserName = $('statBrowserName');
 const statTabs = $('statTabs');
 const statLastCmd = $('statLastCmd');
 const agentSection = $('agentSection');
@@ -38,6 +40,10 @@ function updateStatusUI(status, data = {}) {
     statGateway.title = data.wsUrl;
   } else if (status === 'disconnected') {
     statGateway.textContent = '—';
+  }
+
+  if (data.browserName !== undefined) {
+    statBrowserName.textContent = data.browserName || '—';
   }
 
   if (data.tabCount !== undefined) statTabs.textContent = data.tabCount;
@@ -123,22 +129,25 @@ function scheduleDraftSave() {
 async function saveDraft() {
   const url = gatewayUrlInput.value.trim();
   const token = gatewayTokenInput.value.trim();
-  await chrome.storage.local.set({ gatewayUrlDraft: url, gatewayTokenDraft: token });
+  const name = browserNameInput.value.trim();
+  await chrome.storage.local.set({ gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name });
 }
 
 gatewayUrlInput.addEventListener('input', scheduleDraftSave);
 gatewayTokenInput.addEventListener('input', scheduleDraftSave);
+browserNameInput.addEventListener('input', scheduleDraftSave);
 
 // ── 加载已保存配置 ──────────────────────────────────────────────────────────
 
 async function loadConfig() {
   const data = await chrome.storage.local.get([
-    'gatewayUrl', 'gatewayToken',
-    'gatewayUrlDraft', 'gatewayTokenDraft'
+    'gatewayUrl', 'gatewayToken', 'browserName',
+    'gatewayUrlDraft', 'gatewayTokenDraft', 'browserNameDraft'
   ]);
   // 优先使用草稿（最近输入的），其次用已保存的成功连接配置
   gatewayUrlInput.value   = data.gatewayUrlDraft   || data.gatewayUrl   || '';
   gatewayTokenInput.value = data.gatewayTokenDraft || data.gatewayToken || '';
+  browserNameInput.value  = data.browserNameDraft  || data.browserName  || '';
 }
 
 // ── 获取 background 状态 ───────────────────────────────────────────────────
@@ -163,6 +172,7 @@ async function fetchStatus() {
 connectBtn.addEventListener('click', async () => {
   const url   = gatewayUrlInput.value.trim();
   const token = gatewayTokenInput.value.trim();
+  const name  = browserNameInput.value.trim() || ('Browser-' + Math.random().toString(36).slice(2, 6));
 
   if (!url) {
     gatewayUrlInput.focus();
@@ -178,15 +188,17 @@ connectBtn.addEventListener('click', async () => {
   }
 
   // 保存为"已确认"配置
-  await chrome.storage.local.set({ gatewayUrl: url, gatewayToken: token,
-                                    gatewayUrlDraft: url, gatewayTokenDraft: token });
+  await chrome.storage.local.set({
+    gatewayUrl: url, gatewayToken: token, browserName: name,
+    gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name
+  });
 
   updateStatusUI('connecting', { wsUrl: url });
   connectBtn.disabled = true;
   connectBtn.textContent = '连接中…';
 
   try {
-    await chrome.runtime.sendMessage({ type: 'connect', url, token });
+    await chrome.runtime.sendMessage({ type: 'connect', url, token, name });
   } catch (e) {
     console.error('Connect error:', e);
   }
@@ -218,6 +230,7 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'status_update') {
     updateStatusUI(msg.status, {
       wsUrl: msg.wsUrl,
+      browserName: msg.browserName,
       tabCount: msg.tabCount,
       lastCommand: msg.lastCommand
     });

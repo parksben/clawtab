@@ -9,6 +9,7 @@ let ws = null;
 let wsUrl = null;
 let wsToken = null;
 let wsClientId = 'vivian-ext-' + Math.random().toString(36).slice(2, 8);
+let wsBrowserName = '';
 let pendingConnectId = null;
 let reconnectTimer = null;
 let reconnectDelay = 1000; // 初始重连延迟 1s
@@ -64,7 +65,7 @@ function drawIcon(connected) {
 // WebSocket 管理
 // ─────────────────────────────────────────────
 
-function connect(url, token) {
+function connect(url, token, name) {
   if (ws) {
     ws.onopen = null;
     ws.onmessage = null;
@@ -76,6 +77,9 @@ function connect(url, token) {
 
   wsUrl = url;
   wsToken = token;
+  wsBrowserName = name || '';
+  // clientId 优先用用户自定义名称，否则用随机 id
+  wsClientId = name ? ('browser:' + name) : wsClientId;
 
   if (!url || !token) return;
 
@@ -208,7 +212,7 @@ function scheduleReconnect() {
 
 function setStatus(status) {
   // 广播给 popup
-  chrome.runtime.sendMessage({ type: 'status_update', status, lastCommand, tabCount })
+  chrome.runtime.sendMessage({ type: 'status_update', status, lastCommand, tabCount, wsUrl, browserName: wsBrowserName })
     .catch(() => {}); // popup 可能未打开，忽略错误
 }
 
@@ -419,16 +423,16 @@ async function takeScreenshot(msg) {
 
 async function init() {
   drawIcon(false);
-  const { gatewayUrl, gatewayToken } = await chrome.storage.local.get(['gatewayUrl', 'gatewayToken']);
+  const { gatewayUrl, gatewayToken, browserName } = await chrome.storage.local.get(['gatewayUrl', 'gatewayToken', 'browserName']);
   if (gatewayUrl && gatewayToken) {
-    connect(gatewayUrl, gatewayToken);
+    connect(gatewayUrl, gatewayToken, browserName || '');
   }
 }
 
 // 监听来自 popup 的消息
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'connect') {
-    connect(msg.url, msg.token);
+    connect(msg.url, msg.token, msg.name);
     sendResponse({ ok: true });
 
   } else if (msg.type === 'disconnect') {
@@ -444,7 +448,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     sendResponse({ ok: true });
 
   } else if (msg.type === 'get_status') {
-    sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl });
+    sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl, browserName: wsBrowserName });
 
   } else if (msg.type === 'agents_list') {
     // 通过 Gateway 获取 agents 列表
