@@ -295,7 +295,11 @@ document.addEventListener('click', (e) => {
   if (!menu) return;
   if (e.target.closest('#settingsBtn')) {
     e.stopPropagation();
-    menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+    if (menu.style.display === 'block') {
+      menu.style.display = 'none';
+    } else {
+      menu.style.cssText = 'display:block;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.15);min-width:160px;z-index:99999;overflow:hidden;border:1px solid #e2e8f0;';
+    }
     return;
   }
   if (!e.target.closest('#settingsMenu')) menu.style.display = 'none';
