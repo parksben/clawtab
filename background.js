@@ -1,43 +1,37 @@
 /**
- * background.js - Service Worker
- * 管理 WebSocket 连接生命周期，接收 Gateway 指令并执行
+ * background.js - ClawTab Service Worker
+ * 管理 WebSocket 连接 + 自动化任务执行引擎
  */
 
 const VERSION = '1.0.0';
 
+// ── 状态 ──────────────────────────────────────────────────────────────────
 let ws = null;
 let wsUrl = null;
 let wsToken = null;
-let wsClientId = 'vivian-ext-' + Math.random().toString(36).slice(2, 8);
 let wsBrowserName = '';
 let pendingConnectId = null;
 let reconnectTimer = null;
-let reconnectDelay = 1000; // 初始重连延迟 1s
-const MAX_RECONNECT_DELAY = 30000; // 最大重连延迟 30s
+let reconnectDelay = 1000;
+const MAX_RECONNECT_DELAY = 30000;
 let isConnected = false;
 let lastCommand = '';
 let tabCount = 0;
 
-// ─────────────────────────────────────────────
-// Icon 动态生成（OffscreenCanvas）
-// ─────────────────────────────────────────────
+// 当前任务状态
+let currentTask = null; // { id, name, agentId, steps[], currentStep, status, results[] }
 
+// ── 图标 ──────────────────────────────────────────────────────────────────
 function drawIcon(connected) {
   const sizes = [16, 48, 128];
   const imageData = {};
-
   for (const size of sizes) {
     const canvas = new OffscreenCanvas(size, size);
     const ctx = canvas.getContext('2d');
-
-    // 背景
-    const bgColor = connected ? '#22d3ee' : '#64748b';
-    ctx.fillStyle = bgColor;
-    // 圆角矩形（近似）
-    const r = size * 0.2;
+    ctx.fillStyle = connected ? '#6366f1' : '#94a3b8';
+    const r = size * 0.22;
     ctx.beginPath();
-    ctx.moveTo(r, 0);
-    ctx.lineTo(size - r, 0);
+    ctx.moveTo(r, 0); ctx.lineTo(size - r, 0);
     ctx.quadraticCurveTo(size, 0, size, r);
     ctx.lineTo(size, size - r);
     ctx.quadraticCurveTo(size, size, size - r, size);
@@ -47,154 +41,101 @@ function drawIcon(connected) {
     ctx.quadraticCurveTo(0, 0, r, 0);
     ctx.closePath();
     ctx.fill();
-
-    // 字母 V
     ctx.fillStyle = '#ffffff';
-    ctx.font = `bold ${Math.floor(size * 0.6)}px Arial`;
+    ctx.font = `bold ${Math.floor(size * 0.5)}px Arial`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('V', size / 2, size / 2 + size * 0.03);
-
+    ctx.fillText('C', size / 2, size / 2 + size * 0.02);
     imageData[size] = ctx.getImageData(0, 0, size, size);
   }
-
   chrome.action.setIcon({ imageData });
 }
 
-// ─────────────────────────────────────────────
-// WebSocket 管理
-// ─────────────────────────────────────────────
-
+// ── WebSocket 管理 ────────────────────────────────────────────────────────
 function connect(url, token, name) {
   if (ws) {
-    ws.onopen = null;
-    ws.onmessage = null;
-    ws.onerror = null;
-    ws.onclose = null;
+    ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
     try { ws.close(); } catch (_) {}
     ws = null;
   }
-
-  wsUrl = url;
-  wsToken = token;
-  wsBrowserName = name || '';
-  // clientId 必须固定为 'webchat'（Gateway schema 限制），浏览器名称通过 userAgent 传递
-
+  wsUrl = url; wsToken = token; wsBrowserName = name || '';
   if (!url || !token) return;
-
   setStatus('connecting');
-
-  try {
-    ws = new WebSocket(url);
-  } catch (e) {
-    console.error('[Vivian] WebSocket init error:', e);
-    setStatus('disconnected');
-    scheduleReconnect();
-    return;
+  try { ws = new WebSocket(url); } catch (e) {
+    setStatus('disconnected'); scheduleReconnect(); return;
   }
 
   ws.onopen = () => {
-    console.log('[Vivian] WebSocket connected, sending handshake...');
-    // OpenClaw Gateway 标准握手协议
     const connectId = 'connect-' + Date.now();
     pendingConnectId = connectId;
     ws.send(JSON.stringify({
-      type: 'req',
-      id: connectId,
-      method: 'connect',
+      type: 'req', id: connectId, method: 'connect',
       params: {
-        minProtocol: 3,
-        maxProtocol: 3,
+        minProtocol: 3, maxProtocol: 3,
         client: { id: 'webchat', version: '1.71.3', platform: 'web', mode: 'webchat' },
         role: 'operator',
         scopes: ['operator.read', 'operator.write', 'operator.admin', 'operator.approvals'],
         caps: [], commands: [], permissions: {},
         auth: { token: wsToken },
         locale: 'zh-CN',
-        userAgent: 'vivian-browser-extension/' + VERSION + (wsBrowserName ? ' (' + wsBrowserName + ')' : '')
+        userAgent: `clawtab/${VERSION}${wsBrowserName ? ' (' + wsBrowserName + ')' : ''}`
       }
     }));
   };
 
   ws.onmessage = async (event) => {
     let msg;
-    try {
-      msg = JSON.parse(event.data);
-    } catch (e) {
-      console.warn('[Vivian] Invalid JSON:', event.data);
-      return;
-    }
+    try { msg = JSON.parse(event.data); } catch { return; }
 
-    // 处理握手响应
+    // 握手响应
     if (msg.type === 'res' && msg.id === pendingConnectId) {
       pendingConnectId = null;
       if (msg.ok) {
-        console.log('[Vivian] Handshake OK, connected!');
         reconnectDelay = 1000;
         clearTimeout(reconnectTimer);
         isConnected = true;
         setStatus('connected');
         drawIcon(true);
         reportTabs();
+        // 连接后向 Gateway 上报浏览器信息
+        sendBrowserInfo();
       } else {
         const code = msg.payload?.code || msg.error?.code || '';
-        console.error('[Vivian] Handshake failed:', code, msg);
-        if (code === 'NOT_PAIRED') {
-          setStatus('pairing');
-        } else {
-          setStatus('disconnected');
-          scheduleReconnect();
-        }
+        if (code === 'NOT_PAIRED') { setStatus('pairing'); }
+        else { setStatus('disconnected'); scheduleReconnect(); }
       }
       return;
     }
 
-    // 处理 connect.challenge 事件（无需 device identity，直接忽略）
-    if (msg.type === 'event' && msg.event === 'connect.challenge') {
-      // 不需要 device identity，Gateway 会在 connect req 后直接响应
-      return;
-    }
+    if (msg.type === 'event' && msg.event === 'connect.challenge') return;
 
-    // 处理来自 Gateway 的指令（event 类型）
+    // 处理指令
     if (msg.type === 'event') {
       const payload = msg.payload || msg;
-
-      // Agent 白名单过滤：指令里若携带 agentId，检查是否在 selectedAgents 里
       const agentId = payload.agentId || msg.agentId;
       if (agentId) {
         const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
-        // selectedAgents 为 null/undefined 时视为全选（未设置过）
         if (selectedAgents && !selectedAgents.includes(agentId)) {
-          console.log(`[Vivian] Blocked command from agent "${agentId}" (not in selectedAgents)`);
+          console.log(`[ClawTab] Blocked from agent "${agentId}"`);
           return;
         }
       }
-
       await handleCommand(payload);
       return;
     }
-
-    console.log('[Vivian] Unhandled msg type:', msg.type, msg);
   };
 
-  ws.onerror = (err) => {
-    console.error('[Vivian] WebSocket error:', err);
-  };
-
-  ws.onclose = (ev) => {
-    console.log('[Vivian] WebSocket closed:', ev.code, ev.reason);
-    isConnected = false;
-    ws = null;
-    setStatus('disconnected');
-    drawIcon(false);
+  ws.onerror = () => {};
+  ws.onclose = () => {
+    isConnected = false; ws = null;
+    setStatus('disconnected'); drawIcon(false);
     scheduleReconnect();
   };
 }
 
 function send(data) {
   if (ws && ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify(data));
-    return true;
+    ws.send(JSON.stringify(data)); return true;
   }
   return false;
 }
@@ -202,306 +143,306 @@ function send(data) {
 function scheduleReconnect() {
   clearTimeout(reconnectTimer);
   if (!wsUrl || !wsToken) return;
-  console.log(`[Vivian] Reconnecting in ${reconnectDelay}ms...`);
-  reconnectTimer = setTimeout(() => {
-    connect(wsUrl, wsToken);
-  }, reconnectDelay);
+  reconnectTimer = setTimeout(() => connect(wsUrl, wsToken, wsBrowserName), reconnectDelay);
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
 }
 
 function setStatus(status) {
-  // 广播给 popup
-  chrome.runtime.sendMessage({ type: 'status_update', status, lastCommand, tabCount, wsUrl, browserName: wsBrowserName })
-    .catch(() => {}); // popup 可能未打开，忽略错误
+  broadcastToPopup({ type: 'status_update', status, lastCommand, tabCount, wsUrl, browserName: wsBrowserName });
 }
 
-// ─────────────────────────────────────────────
-// 指令处理
-// ─────────────────────────────────────────────
+function broadcastToPopup(msg) {
+  chrome.runtime.sendMessage(msg).catch(() => {});
+}
 
+// 连接后上报浏览器信息（供 agent 查询）
+async function sendBrowserInfo() {
+  const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
+  send({
+    type: 'browser_info',
+    browserName: wsBrowserName,
+    extensionId: chrome.runtime.id,
+    version: VERSION,
+    authorizedAgents: selectedAgents || null, // null = 全部
+    userAgent: navigator.userAgent,
+  });
+}
+
+// ── 指令处理 ─────────────────────────────────────────────────────────────
 async function handleCommand(msg) {
   lastCommand = msg.type;
   setStatus(isConnected ? 'connected' : 'disconnected');
 
-  const timeout = (ms, label) => new Promise((_, reject) =>
-    setTimeout(() => reject(new Error(`Timeout: ${label}`)), ms)
-  );
+  const TO = (ms, label) => new Promise((_, r) => setTimeout(() => r(new Error(`Timeout: ${label}`)), ms));
 
   try {
     switch (msg.type) {
-      case 'get_tabs':
-        await reportTabs();
-        break;
+      case 'get_tabs':           await reportTabs(); break;
+      case 'get_page_content':   await Promise.race([getPageContent(msg.tabId), TO(10000, 'get_page_content')]); break;
+      case 'execute_js':         await Promise.race([executeJS(msg), TO(15000, 'execute_js')]); break;
+      case 'navigate':           await Promise.race([navigateTab(msg), TO(10000, 'navigate')]); break;
+      case 'screenshot':         await Promise.race([takeScreenshot(msg), TO(15000, 'screenshot')]); break;
 
-      case 'get_page_content':
-        await Promise.race([
-          getPageContent(msg.tabId),
-          timeout(10000, 'get_page_content')
-        ]);
-        break;
-
-      case 'execute_js':
-        await Promise.race([
-          executeJS(msg),
-          timeout(10000, 'execute_js')
-        ]);
-        break;
-
-      case 'navigate':
-        await Promise.race([
-          navigateTab(msg),
-          timeout(10000, 'navigate')
-        ]);
-        break;
-
-      case 'screenshot':
-        await Promise.race([
-          takeScreenshot(msg),
-          timeout(10000, 'screenshot')
-        ]);
-        break;
+      // ── 任务系统 ──────────────────────────────────────────────────────
+      case 'browser_check':      await handleBrowserCheck(msg); break;
+      case 'task_plan':          await handleTaskPlan(msg); break;
+      case 'task_cancel':        handleTaskCancel(msg); break;
 
       default:
-        console.warn('[Vivian] Unknown command:', msg.type);
+        console.warn('[ClawTab] Unknown command:', msg.type);
     }
   } catch (e) {
-    console.error('[Vivian] Command error:', e);
-    if (msg.actionId) {
-      send({ type: 'action_result', actionId: msg.actionId, ok: false, result: e.message });
-    }
+    console.error('[ClawTab] Command error:', msg.type, e);
+    if (msg.actionId) send({ type: 'action_result', actionId: msg.actionId, ok: false, result: e.message });
   }
 }
 
-// ─────────────────────────────────────────────
-// 功能实现
-// ─────────────────────────────────────────────
+// ── browser_check：agent 连接前的标准检查 ─────────────────────────────────
+async function handleBrowserCheck(msg) {
+  const { checkId, agentId } = msg;
+  const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
+  const tabs = await chrome.tabs.query({});
+  const authorized = !selectedAgents || selectedAgents.includes(agentId);
 
+  const snapshot = await Promise.all(
+    tabs.filter(t => t.url && !t.url.startsWith('chrome')).slice(0, 10).map(async t => {
+      let screenshot = null;
+      if (t.active) {
+        try { screenshot = await chrome.tabs.captureVisibleTab(t.windowId, { format: 'jpeg', quality: 60 }); } catch (_) {}
+      }
+      return { id: t.id, url: t.url, title: t.title, active: t.active, screenshot };
+    })
+  );
+
+  send({
+    type: 'browser_check_result',
+    checkId,
+    browserName: wsBrowserName,
+    extensionVersion: VERSION,
+    authorized,
+    agentId,
+    authorizedAgents: selectedAgents || 'all',
+    tabs: snapshot,
+    totalTabs: tabs.length,
+  });
+}
+
+// ── task_plan：接收并执行任务计划 ─────────────────────────────────────────
+async function handleTaskPlan(msg) {
+  const { taskId, taskName, agentId, steps } = msg;
+
+  // 检查权限
+  const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
+  if (selectedAgents && !selectedAgents.includes(agentId)) {
+    send({ type: 'task_result', taskId, ok: false, error: `Agent "${agentId}" not authorized` });
+    return;
+  }
+
+  currentTask = { id: taskId, name: taskName, agentId, steps, currentStep: 0, status: 'running', results: [] };
+  broadcastToPopup({ type: 'task_update', task: currentTask });
+
+  send({ type: 'task_started', taskId, taskName, stepCount: steps.length });
+
+  for (let i = 0; i < steps.length; i++) {
+    currentTask.currentStep = i;
+    broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+
+    const step = steps[i];
+    let result;
+    try {
+      result = await executeStep(step);
+      currentTask.results.push({ step: i, ok: true, result });
+      send({ type: 'task_step_result', taskId, stepIndex: i, step, ok: true, result });
+    } catch (e) {
+      currentTask.results.push({ step: i, ok: false, error: e.message });
+      send({ type: 'task_step_result', taskId, stepIndex: i, step, ok: false, error: e.message });
+      if (step.abortOnError !== false) {
+        currentTask.status = 'failed';
+        broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+        send({ type: 'task_result', taskId, ok: false, error: e.message, results: currentTask.results });
+        return;
+      }
+    }
+
+    broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+  }
+
+  currentTask.status = 'done';
+  broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+  send({ type: 'task_result', taskId, ok: true, results: currentTask.results });
+  // 5s 后清空任务面板
+  setTimeout(() => { currentTask = null; broadcastToPopup({ type: 'task_update', task: null }); }, 5000);
+}
+
+async function executeStep(step) {
+  const TO = (ms) => new Promise((_, r) => setTimeout(() => r(new Error('Step timeout')), ms));
+  const timeout = step.timeout || 15000;
+
+  switch (step.type) {
+    case 'navigate': {
+      await chrome.tabs.update(step.tabId, { url: step.url });
+      await new Promise(r => setTimeout(r, 1000));
+      return `Navigated to ${step.url}`;
+    }
+    case 'execute_js': {
+      const results = await Promise.race([
+        chrome.scripting.executeScript({
+          target: { tabId: step.tabId },
+          world: 'MAIN',
+          func: (code) => { try { return eval(code); } catch(e) { return { __error: e.message }; } },
+          args: [step.code]
+        }),
+        TO(timeout)
+      ]);
+      const r = results?.[0]?.result;
+      if (r?.__error) throw new Error(r.__error);
+      return typeof r === 'object' ? JSON.stringify(r) : String(r ?? '');
+    }
+    case 'screenshot': {
+      const tab = await chrome.tabs.get(step.tabId);
+      await chrome.tabs.update(step.tabId, { active: true });
+      await new Promise(r => setTimeout(r, 400));
+      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'jpeg', quality: 70 });
+      return dataUrl;
+    }
+    case 'get_content': {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId: step.tabId }, func: extractPageContent
+      });
+      return results?.[0]?.result || {};
+    }
+    case 'wait':
+      await new Promise(r => setTimeout(r, step.ms || 1000));
+      return 'waited ' + (step.ms || 1000) + 'ms';
+    default:
+      throw new Error(`Unknown step type: ${step.type}`);
+  }
+}
+
+function handleTaskCancel({ taskId }) {
+  if (currentTask?.id === taskId) {
+    currentTask.status = 'cancelled';
+    broadcastToPopup({ type: 'task_update', task: { ...currentTask } });
+    send({ type: 'task_result', taskId, ok: false, error: 'Cancelled by user' });
+    setTimeout(() => { currentTask = null; broadcastToPopup({ type: 'task_update', task: null }); }, 3000);
+  }
+}
+
+// ── 基础功能 ──────────────────────────────────────────────────────────────
 async function reportTabs() {
   const tabs = await chrome.tabs.query({});
   tabCount = tabs.length;
   setStatus(isConnected ? 'connected' : 'disconnected');
-  send({
-    type: 'tabs_list',
-    tabs: tabs.map(t => ({
-      id: t.id,
-      url: t.url,
-      title: t.title,
-      favIconUrl: t.favIconUrl || '',
-      active: t.active,
-      windowId: t.windowId
-    }))
-  });
+  send({ type: 'tabs_list', tabs: tabs.map(t => ({ id: t.id, url: t.url, title: t.title, favIconUrl: t.favIconUrl || '', active: t.active, windowId: t.windowId })) });
 }
 
 async function getPageContent(tabId) {
-  // 若没有指定 tabId，使用当前激活标签页
   let targetTabId = tabId;
   if (!targetTabId) {
-    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!activeTab) throw new Error('No active tab');
-    targetTabId = activeTab.id;
+    const [t] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!t) throw new Error('No active tab');
+    targetTabId = t.id;
   }
-
   const tab = await chrome.tabs.get(targetTabId);
-
-  // 注入脚本获取页面内容
   let results;
-  try {
-    results = await chrome.scripting.executeScript({
-      target: { tabId: targetTabId },
-      func: extractPageContent
-    });
-  } catch (e) {
-    // 某些页面（chrome://、扩展页）不允许注入
-    send({
-      type: 'page_content',
-      tabId: targetTabId,
-      url: tab.url,
-      title: tab.title,
-      text: '[无法访问此页面内容]',
-      html: ''
-    });
-    return;
-  }
-
-  const content = results[0]?.result || { text: '', html: '' };
-  send({
-    type: 'page_content',
-    tabId: targetTabId,
-    url: tab.url,
-    title: tab.title,
-    text: content.text,
-    html: content.html
-  });
+  try { results = await chrome.scripting.executeScript({ target: { tabId: targetTabId }, func: extractPageContent }); }
+  catch { send({ type: 'page_content', tabId: targetTabId, url: tab.url, title: tab.title, text: '[inaccessible]', html: '' }); return; }
+  const c = results[0]?.result || { text: '', html: '' };
+  send({ type: 'page_content', tabId: targetTabId, url: tab.url, title: tab.title, text: c.text, html: c.html });
 }
 
-// 在页面上下文中执行，提取内容
 function extractPageContent() {
   const text = document.body?.innerText || '';
   const clone = document.body?.cloneNode(true);
   if (clone) {
-    // 移除 script/style/noscript
-    clone.querySelectorAll('script, style, noscript, svg').forEach(el => el.remove());
-    const html = clone.innerHTML
-      .replace(/\s{2,}/g, ' ')
-      .replace(/<!--[\s\S]*?-->/g, '')
-      .trim();
-    return { text: text.slice(0, 50000), html: html.slice(0, 100000) };
+    clone.querySelectorAll('script,style,noscript,svg').forEach(el => el.remove());
+    return { text: text.slice(0, 50000), html: clone.innerHTML.replace(/\s{2,}/g,' ').slice(0, 100000) };
   }
   return { text: text.slice(0, 50000), html: '' };
 }
 
 async function executeJS(msg) {
   const { actionId, tabId, code } = msg;
-
-  let results;
   try {
-    results = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: new Function(`return (async () => { ${code} })()`), // eslint-disable-line no-new-func
-      args: []
+    const results = await chrome.scripting.executeScript({
+      target: { tabId }, world: 'MAIN',
+      func: (c) => { try { return eval(c); } catch(e) { return { __error: e.message }; } },
+      args: [code]
     });
-  } catch (e) {
-    // 使用字符串注入方式
-    try {
-      results = await chrome.scripting.executeScript({
-        target: { tabId },
-        world: 'MAIN',
-        func: (codeStr) => {
-          try {
-            // eslint-disable-next-line no-eval
-            return eval(codeStr);
-          } catch (err) {
-            return { __error: err.message };
-          }
-        },
-        args: [code]
-      });
-    } catch (e2) {
-      send({ type: 'action_result', actionId, ok: false, result: e2.message });
-      return;
-    }
-  }
-
-  const result = results?.[0]?.result;
-  if (result && typeof result === 'object' && result.__error) {
-    send({ type: 'action_result', actionId, ok: false, result: result.__error });
-  } else {
-    send({ type: 'action_result', actionId, ok: true, result: JSON.stringify(result) });
-  }
+    const r = results?.[0]?.result;
+    if (r?.__error) send({ type: 'action_result', actionId, ok: false, result: r.__error });
+    else send({ type: 'action_result', actionId, ok: true, result: JSON.stringify(r) });
+  } catch (e) { send({ type: 'action_result', actionId, ok: false, result: e.message }); }
 }
 
-async function navigateTab(msg) {
-  const { actionId, tabId, url } = msg;
-  try {
-    await chrome.tabs.update(tabId, { url });
-    send({ type: 'action_result', actionId, ok: true, result: `Navigated to ${url}` });
-  } catch (e) {
-    send({ type: 'action_result', actionId, ok: false, result: e.message });
-  }
+async function navigateTab({ actionId, tabId, url }) {
+  try { await chrome.tabs.update(tabId, { url }); send({ type: 'action_result', actionId, ok: true, result: `Navigated to ${url}` }); }
+  catch (e) { send({ type: 'action_result', actionId, ok: false, result: e.message }); }
 }
 
-async function takeScreenshot(msg) {
-  const { actionId, tabId } = msg;
+async function takeScreenshot({ actionId, tabId }) {
   try {
-    // 需要先把目标标签激活（captureVisibleTab 只能截当前可见标签页）
     const tab = await chrome.tabs.get(tabId);
     await chrome.tabs.update(tabId, { active: true });
-    // 等待标签激活
     await new Promise(r => setTimeout(r, 300));
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
     send({ type: 'action_result', actionId, ok: true, result: dataUrl });
-  } catch (e) {
-    send({ type: 'action_result', actionId, ok: false, result: e.message });
-  }
+  } catch (e) { send({ type: 'action_result', actionId, ok: false, result: e.message }); }
 }
 
-// ─────────────────────────────────────────────
-// 初始化 & 生命周期
-// ─────────────────────────────────────────────
-
-async function init() {
-  drawIcon(false);
-  const { gatewayUrl, gatewayToken, browserName } = await chrome.storage.local.get(['gatewayUrl', 'gatewayToken', 'browserName']);
-  if (gatewayUrl && gatewayToken) {
-    connect(gatewayUrl, gatewayToken, browserName || '');
-  }
-}
-
-// 监听来自 popup 的消息
+// ── Popup 消息处理 ────────────────────────────────────────────────────────
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'connect') {
-    connect(msg.url, msg.token, msg.name);
-    sendResponse({ ok: true });
-
+    connect(msg.url, msg.token, msg.name); sendResponse({ ok: true });
   } else if (msg.type === 'disconnect') {
-    clearTimeout(reconnectTimer);
-    wsUrl = null;
-    wsToken = null;
-    if (ws) {
-      try { ws.close(); } catch (_) {}
-      ws = null;
-    }
-    isConnected = false;
-    drawIcon(false);
-    sendResponse({ ok: true });
-
+    clearTimeout(reconnectTimer); wsUrl = wsToken = null;
+    if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+    isConnected = false; drawIcon(false); sendResponse({ ok: true });
   } else if (msg.type === 'get_status') {
-    sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl, browserName: wsBrowserName });
-
+    sendResponse({ status: isConnected ? 'connected' : 'disconnected', lastCommand, tabCount, wsUrl, browserName: wsBrowserName, currentTask });
   } else if (msg.type === 'agents_list') {
-    // 通过 Gateway 获取 agents 列表
-    if (!isConnected || !ws) {
-      sendResponse({ agents: [] });
-      return true;
-    }
+    if (!isConnected || !ws) { sendResponse({ agents: [] }); return true; }
     const reqId = 'agents-' + Date.now();
     const timer = setTimeout(() => sendResponse({ agents: [] }), 5000);
     const handler = (event) => {
       try {
         const m = JSON.parse(event.data);
         if (m.type === 'res' && m.id === reqId) {
-          ws.removeEventListener('message', handler);
-          clearTimeout(timer);
-          const agents = (m.payload?.agents || []).map(a => a.id || a.agentId).filter(Boolean);
-          sendResponse({ agents });
+          ws.removeEventListener('message', handler); clearTimeout(timer);
+          sendResponse({ agents: (m.payload?.agents || []).map(a => a.id || a.agentId).filter(Boolean) });
         }
       } catch (_) {}
     };
     ws.addEventListener('message', handler);
     ws.send(JSON.stringify({ type: 'req', id: reqId, method: 'agents.list', params: {} }));
-    return true; // 异步响应
-
+    return true;
   } else if (msg.type === 'update_selected_agents') {
-    // popup 更新选中 agent，直接存储（background 读取时用）
     chrome.storage.local.set({ selectedAgents: msg.agents });
     sendResponse({ ok: true });
+    // 授权变更后重新上报浏览器信息
+    if (isConnected) sendBrowserInfo();
+  } else if (msg.type === 'task_cancel' && currentTask) {
+    handleTaskCancel({ taskId: currentTask.id });
+    sendResponse({ ok: true });
   }
-
   return true;
 });
 
-// 标签页变化时更新计数
-chrome.tabs.onCreated.addListener(() => reportTabsIfConnected());
-chrome.tabs.onRemoved.addListener(() => reportTabsIfConnected());
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo) => {
-  if (changeInfo.status === 'complete') reportTabsIfConnected();
-});
+// ── 标签页监听 ────────────────────────────────────────────────────────────
+chrome.tabs.onCreated.addListener(() => { if (isConnected) reportTabs(); });
+chrome.tabs.onRemoved.addListener(() => { if (isConnected) reportTabs(); });
+chrome.tabs.onUpdated.addListener((_, info) => { if (info.status === 'complete' && isConnected) reportTabs(); });
 
-function reportTabsIfConnected() {
-  if (isConnected) reportTabs();
+// ── 初始化 ────────────────────────────────────────────────────────────────
+async function init() {
+  drawIcon(false);
+  const { gatewayUrl, gatewayToken, browserName } = await chrome.storage.local.get(['gatewayUrl', 'gatewayToken', 'browserName']);
+  if (gatewayUrl && gatewayToken) connect(gatewayUrl, gatewayToken, browserName || '');
 }
 
-// Service Worker 激活时初始化
-init();
-
-// 防止 Service Worker 被终止（使用 alarm 保活）
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
-chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'keepalive') {
-    // 检查 ws 状态，若断连且有配置则重连
-    if (!isConnected && wsUrl && wsToken && !reconnectTimer) {
-      connect(wsUrl, wsToken);
-    }
-  }
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === 'keepalive' && !isConnected && wsUrl && wsToken && !reconnectTimer) connect(wsUrl, wsToken, wsBrowserName);
 });
+
+init();

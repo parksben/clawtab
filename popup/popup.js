@@ -25,6 +25,12 @@ const I18N = {
     pairing: '等待配对…',
     disconnected: '未连接',
     connecting2: '连接中…',
+    task: '任务进度',
+    cancelTask: '取消任务',
+    taskRunning: '执行中',
+    taskDone: '已完成',
+    taskFailed: '失败',
+    taskCancelled: '已取消',
   },
   en: {
     config: 'Connection',
@@ -46,6 +52,12 @@ const I18N = {
     pairing: 'Awaiting pairing…',
     disconnected: 'Disconnected',
     connecting2: 'Connecting…',
+    task: 'Task Progress',
+    cancelTask: 'Cancel Task',
+    taskRunning: 'Running',
+    taskDone: 'Done',
+    taskFailed: 'Failed',
+    taskCancelled: 'Cancelled',
   }
 };
 
@@ -85,6 +97,47 @@ const statTabs       = $('statTabs');
 const statLastCmd    = $('statLastCmd');
 const agentSection   = $('agentSection');
 const agentList      = $('agentList');
+
+const taskSection    = $('taskSection');
+const taskStatusBadge = $('taskStatusBadge');
+const taskNameEl     = $('taskName');
+const taskStepsEl    = $('taskSteps');
+const cancelTaskBtn  = $('cancelTaskBtn');
+
+// ── Task Panel ────────────────────────────────────────────────────────────
+
+const STEP_ICON = { running: '⏳', done: '✅', failed: '❌', pending: '○' };
+const STEP_TYPE_LABEL = { navigate: 'Navigate', execute_js: 'Execute JS', screenshot: 'Screenshot', get_content: 'Get Content', wait: 'Wait' };
+
+function renderTask(task) {
+  if (!task) { taskSection.style.display = 'none'; return; }
+  taskSection.style.display = '';
+
+  taskNameEl.textContent = task.name || task.id;
+
+  const statusKey = { running: 'taskRunning', done: 'taskDone', failed: 'taskFailed', cancelled: 'taskCancelled' }[task.status] || 'taskRunning';
+  taskStatusBadge.textContent = t(statusKey);
+  taskStatusBadge.className = `task-status-badge ${task.status}`;
+
+  taskStepsEl.innerHTML = '';
+  task.steps.forEach((step, i) => {
+    let stepStatus = 'pending';
+    if (i < task.currentStep) stepStatus = task.results[i]?.ok === false ? 'failed' : 'done';
+    else if (i === task.currentStep && task.status === 'running') stepStatus = 'running';
+    else if (task.status === 'done') stepStatus = task.results[i]?.ok === false ? 'failed' : 'done';
+
+    const row = document.createElement('div');
+    row.className = `task-step ${stepStatus}`;
+    row.innerHTML = `<span class="step-icon">${STEP_ICON[stepStatus]}</span><span class="step-label">${step.label || STEP_TYPE_LABEL[step.type] || step.type}</span>`;
+    taskStepsEl.appendChild(row);
+  });
+
+  cancelTaskBtn.style.display = task.status === 'running' ? '' : 'none';
+}
+
+cancelTaskBtn.addEventListener('click', async () => {
+  try { await chrome.runtime.sendMessage({ type: 'task_cancel' }); } catch (_) {}
+});
 
 // ── Status UI ─────────────────────────────────────────────────────────────
 
@@ -213,6 +266,7 @@ async function fetchStatus() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'get_status' });
     if (resp) updateStatusUI(resp.status, { wsUrl: resp.wsUrl, browserName: resp.browserName, tabCount: resp.tabCount, lastCommand: resp.lastCommand });
+    if (resp?.currentTask) renderTask(resp.currentTask);
   } catch (e) {
     updateStatusUI('disconnected');
   }
@@ -272,6 +326,9 @@ langBtn.addEventListener('click', async () => {
 chrome.runtime.onMessage.addListener(msg => {
   if (msg.type === 'status_update') {
     updateStatusUI(msg.status, { wsUrl: msg.wsUrl, browserName: msg.browserName, tabCount: msg.tabCount, lastCommand: msg.lastCommand });
+  }
+  if (msg.type === 'task_update') {
+    renderTask(msg.task);
   }
 });
 
