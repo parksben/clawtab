@@ -94,33 +94,33 @@ const occupiedBanner  = $('occupiedBanner');
 
 // ── Task Panel ────────────────────────────────────────────────────────────
 
-const STEP_ICON = { running: '⏳', done: '✅', failed: '❌', pending: '○' };
-const STEP_TYPE_LABEL = { navigate: 'Navigate', execute_js: 'Execute JS', screenshot: 'Screenshot', get_content: 'Get Content', wait: 'Wait' };
-
-function renderTask(task) {
-  if (!task) { taskSection.style.display = 'none'; return; }
+function renderTask(data) {
+  const { taskStatus, taskName, taskAgentId, taskSteps, taskCurrentStep, taskResults } = data;
+  if (!taskStatus || taskStatus === 'idle' || !taskSteps?.length) {
+    taskSection.style.display = 'none'; return;
+  }
   taskSection.style.display = '';
 
-  taskNameEl.textContent = task.name || task.id;
-
-  const statusKey = { running: 'taskRunning', done: 'taskDone', failed: 'taskFailed', cancelled: 'taskCancelled' }[task.status] || 'taskRunning';
+  const statusKey = { running: 'taskRunning', done: 'taskDone', failed: 'taskFailed', cancelled: 'taskCancelled' }[taskStatus] || 'taskRunning';
   taskStatusBadge.textContent = t(statusKey);
-  taskStatusBadge.className = `task-status-badge ${task.status}`;
+  taskStatusBadge.className = `task-status-badge ${taskStatus}`;
+  taskNameEl.textContent = `${taskAgentId ? '['+taskAgentId+'] ' : ''}${taskName || ''}`;
 
   taskStepsEl.innerHTML = '';
-  task.steps.forEach((step, i) => {
-    let stepStatus = 'pending';
-    if (i < task.currentStep) stepStatus = task.results[i]?.ok === false ? 'failed' : 'done';
-    else if (i === task.currentStep && task.status === 'running') stepStatus = 'running';
-    else if (task.status === 'done') stepStatus = task.results[i]?.ok === false ? 'failed' : 'done';
+  taskSteps.forEach((step, i) => {
+    let s = 'pending';
+    if (taskStatus === 'done') s = (taskResults?.[i]?.ok === false) ? 'failed' : 'done';
+    else if (i < taskCurrentStep) s = (taskResults?.[i]?.ok === false) ? 'failed' : 'done';
+    else if (i === taskCurrentStep && taskStatus === 'running') s = 'running';
 
     const row = document.createElement('div');
-    row.className = `task-step ${stepStatus}`;
-    row.innerHTML = `<span class="step-icon">${STEP_ICON[stepStatus]}</span><span class="step-label">${step.label || STEP_TYPE_LABEL[step.type] || step.type}</span>`;
+    row.className = `task-step ${s}`;
+    const icons = { running:'⏳', done:'✅', failed:'❌', pending:'○' };
+    row.innerHTML = `<span class="step-icon">${icons[s]}</span><span class="step-label">${step.label || step.type}</span>`;
     taskStepsEl.appendChild(row);
   });
 
-  cancelTaskBtn.style.display = task.status === 'running' ? '' : 'none';
+  cancelTaskBtn.style.display = taskStatus === 'running' ? '' : 'none';
 }
 
 cancelTaskBtn.addEventListener('click', async () => {
@@ -136,24 +136,36 @@ const STATUS_DOT = {
   disconnected: 'disconnected',
 };
 
-function updateStatusUI(status, data = {}) {
-  const dotClass = STATUS_DOT[status] || 'disconnected';
+function updateStatusUI(data) {
+  const connected = data.wsConnected;
+  const taskRunning = data.taskStatus === 'running';
+
+  // WS 状态
+  const dotClass = taskRunning ? 'running' : connected ? 'connected' : 'disconnected';
   statusDot.className = `status-dot ${dotClass}`;
-  statusText.dataset.status = status;
-  statusText.textContent = t(status) || status;
+  statusDot.style.background = taskRunning ? '#22c55e' : '';
 
+  const statusKey = taskRunning ? 'taskRunning' : connected ? 'connected' : 'disconnected';
+  statusText.dataset.status = statusKey;
+  statusText.textContent = t(statusKey);
+
+  // Stats
   if (data.wsUrl) {
-    let display = data.wsUrl;
-    try { display = new URL(data.wsUrl).host; } catch (_) {}
-    statGateway.textContent = display;
-    statGateway.title = data.wsUrl;
-  } else if (status === 'disconnected') {
-    statGateway.textContent = '—';
-  }
+    try { statGateway.textContent = new URL(data.wsUrl).host; statGateway.title = data.wsUrl; }
+    catch(_) { statGateway.textContent = data.wsUrl; }
+  } else { statGateway.textContent = '—'; }
+  statBrowserName.textContent = data.browserId || '—';
+  statTabs.textContent = data.tabCount ?? 0;
+  if (data.lastCmd) statLastCmd.textContent = data.lastCmd;
 
-  if (data.browserName !== undefined) statBrowserName.textContent = data.browserName || '—';
-  if (data.tabCount !== undefined) statTabs.textContent = data.tabCount;
-  if (data.lastCommand) statLastCmd.textContent = data.lastCommand;
+  // 占用 banner
+  if (data.taskStatus === 'running' && data.taskAgentId) {
+    occupiedBanner.style.display = '';
+    occupiedBanner.textContent = `🔒 ${data.taskAgentId} · ${data.taskName || data.taskCmdId || ''}`;
+  } else { occupiedBanner.style.display = 'none'; }
+
+  // 任务面板
+  renderTask(data);
 }
 
 // ── Agent list ────────────────────────────────────────────────────────────
@@ -198,12 +210,9 @@ async function loadConfig() {
 async function fetchStatus() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'get_status' });
-    if (resp) updateStatusUI(resp.status, { wsUrl: resp.wsUrl, browserName: resp.browserName, tabCount: resp.tabCount, lastCommand: resp.lastCommand });
-    if (resp?.currentTask) renderTask(resp.currentTask);
-    if (resp?.occupiedByAgent) { occupiedBanner.style.display = ''; occupiedBanner.textContent = `🔒 Occupied by agent: ${resp.occupiedByAgent}`; }
-    else { occupiedBanner.style.display = 'none'; }
+    if (resp) updateStatusUI(resp);
   } catch (e) {
-    updateStatusUI('disconnected');
+    updateStatusUI({ wsConnected: false });
   }
 }
 
@@ -229,8 +238,7 @@ connectBtn.addEventListener('click', async () => {
     connectBtn.disabled = false;
     connectBtn.textContent = t('connect');
     await fetchStatus();
-  }, 1500);
-});
+  }, 1500);});
 
 // ── Disconnect ────────────────────────────────────────────────────────────
 
@@ -259,14 +267,7 @@ langBtn.addEventListener('click', async () => {
 // ── Background status push ────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener(msg => {
-  if (msg.type === 'status_update') {
-    updateStatusUI(msg.status, { wsUrl: msg.wsUrl, browserName: msg.browserName, tabCount: msg.tabCount, lastCommand: msg.lastCommand });
-  }
-  if (msg.type === 'task_update') { renderTask(msg.task); }
-  if (msg.type === 'occupied_update') {
-    if (msg.agentId) { occupiedBanner.style.display = ''; occupiedBanner.textContent = `🔒 Occupied by agent: ${msg.agentId}`; }
-    else { occupiedBanner.style.display = 'none'; }
-  }
+  if (msg.type === 'status_update') updateStatusUI(msg);
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────

@@ -377,3 +377,8 @@ input.input-error {
   border-radius: 8px;
   margin-bottom: 8px;
 }
+
+.status-dot.running {
+  background: #22c55e;
+  animation: pulse 1.2s ease-in-out infinite;
+}
