@@ -61,7 +61,7 @@ const I18N = {
   }
 };
 
-let currentLang = 'zh';
+let currentLang = 'en'; // 默认英文
 
 function t(key) {
   return I18N[currentLang]?.[key] || I18N.zh[key] || key;

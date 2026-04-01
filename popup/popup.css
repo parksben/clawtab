@@ -169,6 +169,11 @@ input[type="password"] {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+input[type="text"]::placeholder,
+input[type="password"]::placeholder {
+  color: #cbd5e1;
+}
+
 input[type="text"]:focus,
 input[type="password"]:focus {
   border-color: #6366f1;
