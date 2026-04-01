@@ -134,6 +134,12 @@ function setStatus(key, customText) {
 let lastData = null;
 
 function render(data) {
+  // 去抖：核心状态没变化就不重渲染，避免闪烁
+  const key = `${data.wsConnected}|${data.pairingPending}|${data.reconnecting}|${data.gaveUp}|${data.loop?.status}`;
+  if (lastData && key === `${lastData.wsConnected}|${lastData.pairingPending}|${lastData.reconnecting}|${lastData.gaveUp}|${lastData.loop?.status}`) {
+    lastData = data; // 仍然更新数据（比如截图），但不重绘 DOM
+    return;
+  }
   lastData = data;
   const { wsConnected, pairingPending, reconnecting, gaveUp, deviceId,
           loop, browserId, wsUrl, tabCount } = data;
@@ -317,7 +323,8 @@ document.getElementById('connectBtn').addEventListener('click', async () => {
   const btn = document.getElementById('connectBtn');
   btn.disabled = true; btn.textContent = t('connecting');
   try { await chrome.runtime.sendMessage({ type:'connect', url, token, name }); } catch(_) {}
-  setTimeout(async () => { btn.disabled = false; btn.textContent = t('connect'); await fetchStatus(); }, 1500);
+  // background 会 broadcastStatus，popup 被动接收，不主动轮询
+  setTimeout(() => { btn.disabled = false; btn.textContent = t('connect'); }, 1500);
 });
 
 // Disconnect inline
@@ -470,5 +477,5 @@ async function fetchStatus() {
   }
 
   // Step 4: get real status from background (after brief delay for SW to reconnect)
-  setTimeout(fetchStatus, 500);
+  setTimeout(fetchStatus, 200);
 })();

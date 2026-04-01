@@ -110,13 +110,15 @@ function broadcast(msg) { chrome.runtime.sendMessage(msg).catch(()=>{}); }
 function broadcastStatus() {
   broadcast({
     type: 'status_update',
-    wsConnected: S.wsConnected,
+    wsConnected:   S.wsConnected,
     pairingPending: S.pairingPending,
-    deviceId: S.deviceIdentity?.id || '',
-    browserId: S.browserId,
-    wsUrl: S.wsUrl,
-    tabCount: S.tabCount,
-    lastCmd: S.lastCmd,
+    reconnecting:  !S.wsConnected && !!S.wsUrl && !S.pairingPending,
+    gaveUp:        S.wsGaveUp || false,
+    deviceId:      S.deviceIdentity?.id || '',
+    browserId:     S.browserId,
+    wsUrl:         S.wsUrl,
+    tabCount:      S.tabCount,
+    lastCmd:       S.lastCmd,
     loop: {
       status:         S.loop.status,
       goal:           S.loop.goal,
@@ -906,7 +908,7 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         sendResponse({ok:true}); break;
       case 'get_status':
         sendResponse({wsConnected:S.wsConnected,pairingPending:S.pairingPending,
-          reconnecting: !S.wsConnected && !!S.wsUrl,  // 有配置但未连接 = 正在重连
+          reconnecting: !S.wsConnected && !!S.wsUrl && !S.pairingPending,  // 有配置但未连接 = 正在重连（配对等待中不算重连）
           deviceId:S.deviceIdentity?.id||'',
           browserId:S.browserId,
           wsUrl:S.wsUrl,tabCount:S.tabCount,lastCmd:S.lastCmd,loop:{
