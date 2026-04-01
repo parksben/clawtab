@@ -45,7 +45,7 @@ body {
 .lang-btn:hover { background: #ddd6fe; }
 
 /* ─── Body ─── */
-.body { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.body { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
 
 /* ─── Section card ─── */
 .section {
@@ -258,7 +258,7 @@ input.input-error { border-color: #ef4444; }
   position: absolute; right: 0; top: calc(100% + 6px);
   background: #fff; border-radius: 10px;
   box-shadow: 0 4px 16px rgba(0,0,0,.12), 0 1px 4px rgba(0,0,0,.06);
-  min-width: 160px; z-index: 200; overflow: hidden;
+  min-width: 160px; z-index: 9999;
   animation: menu-in .12s ease;
 }
 @keyframes menu-in { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }

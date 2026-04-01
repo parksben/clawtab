@@ -337,8 +337,9 @@ const settingsMenu = $('settingsMenu');
 
 settingsBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  const isOpen = settingsMenu.style.display !== 'none';
+  const isOpen = settingsMenu.style.display !== 'none' && settingsMenu.style.display !== '';
   settingsMenu.style.display = isOpen ? 'none' : 'block';
+  console.log('[ClawTab] settings menu toggled:', !isOpen);
 });
 
 // 点菜单内的项不关闭（由各项自己关）
