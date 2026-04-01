@@ -7,21 +7,29 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <!-- Header -->
-  <div class="header">
-    <div class="brand">
+
+  <!-- ── Header ── -->
+  <div class="header" id="mainHeader">
+    <div class="brand" id="brandArea">
       <span class="brand-name">ClawTab</span>
       <span class="brand-sub">OpenClaw Browser Client</span>
     </div>
     <div class="header-right">
-      <div class="status-badge" id="statusBadge">
+      <div class="status-badge">
         <span class="status-dot" id="statusDot"></span>
         <span id="statusText">—</span>
       </div>
+      <!-- 连接成功后显示断联按钮 -->
+      <button class="disconnect-inline-btn" id="disconnectInlineBtn" style="display:none;" title="Disconnect">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M18.36 6.64a9 9 0 1 1-12.73 0"/><line x1="12" y1="2" x2="12" y2="12"/>
+        </svg>
+      </button>
       <div class="settings-wrap" id="settingsWrap">
         <button class="settings-btn" id="settingsBtn" title="Settings">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
         </button>
         <div class="settings-menu" id="settingsMenu" style="display:none;">
@@ -37,72 +45,71 @@
 
   <div class="body">
 
-    <!-- Connection (collapsed when connected) -->
+    <!-- ── Config panel (disconnected) ── -->
     <div class="section" id="configSection">
       <div id="retryTip" class="retry-tip" style="display:none;">⚠️ <span data-i18n="connFailed"></span></div>
-      <div class="section-title" data-i18n="config">
-        <button class="collapse-btn" id="collapseConfig">▾</button>
+      <div class="section-title" data-i18n="config"></div>
+      <div class="form-group">
+        <label>Gateway URL</label>
+        <input type="text" id="gatewayUrl" placeholder="ws://localhost:18789" autocomplete="off" spellcheck="false" />
       </div>
-      <div id="configBody">
-        <div class="form-group">
-          <label>Gateway URL</label>
-          <input type="text" id="gatewayUrl" placeholder="ws://localhost:18789" autocomplete="off" spellcheck="false" />
+      <div class="form-group">
+        <label>Access Token</label>
+        <div class="input-row">
+          <input type="password" id="gatewayToken" placeholder="your-gateway-token" autocomplete="off" />
+          <button class="icon-btn" id="toggleToken">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
         </div>
-        <div class="form-group">
-          <label>Access Token</label>
-          <div class="input-row">
-            <input type="password" id="gatewayToken" placeholder="your-gateway-token" autocomplete="off" />
-            <button class="icon-btn" id="toggleToken">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-            </button>
-          </div>
-        </div>
-        <div class="form-group">
-          <label><span data-i18n="browserName"></span> <span class="label-hint" data-i18n="browserNameHint"></span></label>
-          <input type="text" id="browserName" placeholder="my_work_browser" autocomplete="off" maxlength="40" />
-        </div>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="connectBtn" data-i18n="connect"></button>
-          <button class="btn btn-secondary" id="disconnectBtn" data-i18n="disconnect"></button>
-        </div>
+      </div>
+      <div class="form-group">
+        <label><span data-i18n="browserName"></span> <span class="label-hint" data-i18n="browserNameHint"></span></label>
+        <input type="text" id="browserName" placeholder="my_work_browser" autocomplete="off" maxlength="40" />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="connectBtn" data-i18n="connect"></button>
       </div>
     </div>
 
-    <!-- Pairing banner -->
-    <div id="pairingBanner" class="pairing-banner" style="display:none;"></div>
+    <!-- ── Pairing panel (waiting for approval) ── -->
+    <div class="section pairing-section" id="pairingSection" style="display:none;">
+      <div class="pairing-icon">🔗</div>
+      <div class="pairing-title-big" data-i18n="pairingTitle"></div>
+      <div class="pairing-desc" data-i18n="pairingDesc"></div>
+      <div class="pairing-code-wrap">
+        <span class="pairing-code-text" id="pairingCodeText"></span>
+        <button class="copy-btn" id="pairingCopyBtn">⎘</button>
+      </div>
+      <div class="pairing-or" data-i18n="pairingOr"></div>
+      <code class="pairing-cmd" id="pairingCmd"></code>
+      <button class="btn btn-secondary pairing-cancel-btn" id="pairingCancelBtn" data-i18n="cancel"></button>
+    </div>
 
-    <!-- Agent Loop Panel (shown when connected) -->
+    <!-- ── Pairing banner (old, keep for compat) ── -->
+    <div id="pairingBanner" style="display:none;"></div>
+
+    <!-- ── Agent Loop Panel (connected, task running) ── -->
     <div class="section loop-section" id="loopSection" style="display:none;">
-
-      <!-- Goal -->
       <div class="loop-goal" id="loopGoal" style="display:none;"></div>
-
-      <!-- Status line with animation -->
       <div class="loop-status-row" id="loopStatusRow">
         <span class="loop-indicator" id="loopIndicator"></span>
-        <span class="loop-status-text" id="loopStatusText" data-i18n="idle"></span>
+        <span class="loop-status-text" id="loopStatusText"></span>
         <span class="loop-step" id="loopStep"></span>
       </div>
-
-      <!-- Current screenshot -->
       <div class="screenshot-wrap" id="screenshotWrap" style="display:none;">
         <img id="screenshotImg" class="screenshot-img" alt="Page snapshot" />
         <div class="screenshot-label" id="screenshotLabel"></div>
       </div>
-
-      <!-- History -->
       <div class="history-list" id="historyList" style="display:none;"></div>
-
-      <!-- Cancel -->
       <div id="cancelRow" class="cancel-row" style="display:none;">
         <button class="btn btn-danger" id="cancelBtn" data-i18n="cancel"></button>
       </div>
     </div>
 
-    <!-- Stats (compact) -->
+    <!-- ── Stats bar (connected, idle) ── -->
     <div class="stats-bar" id="statsBar" style="display:none;">
       <span class="stat-chip"><span class="stat-chip-label">Gateway</span><span id="statGateway">—</span></span>
       <span class="stat-chip"><span class="stat-chip-label" data-i18n="browserIdLabel"></span><span id="statBrowserName">—</span></span>

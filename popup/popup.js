@@ -23,6 +23,9 @@ const I18N = {
     pairingDesc: 'Send this pairing code to your OpenClaw agent to complete the setup:',
     pairingCmd: 'Or run on your Gateway:',
     switchLang: '切换中文',
+    pairingOr: '或在服务器上运行：',
+    pairingCopy: '已复制！',
+    cancel: '取消',
     connFailed: '连接失败，请检查配置',
     exportConfig: 'Export config…',
     importConfig: 'Import config…',
@@ -57,6 +60,9 @@ const I18N = {
     pairingDesc: '将以下配对码发送给 OpenClaw Agent 完成绑定：',
     pairingCmd: '或在 Gateway 上运行：',
     switchLang: 'Switch to English',
+    pairingOr: 'Or run on your server:',
+    pairingCopy: 'Copied!',
+    cancel: 'Cancel',
     connFailed: 'Connection failed — check config',
     exportConfig: '导出配置…',
     importConfig: '导入配置…',
@@ -122,30 +128,26 @@ function render(data) {
   const retryTip = $('retryTip');
   if (retryTip) retryTip.style.display = gaveUp ? '' : 'none';
 
-  // Pairing banner
+  // Pairing section（大面板）
+  const pairSec = $('pairingSection');
   if (pairingPending) {
-    $('pairingBanner').style.display = '';
+    pairSec.style.display = '';
     const deviceId = data.deviceId || '';
-    const approveCmd = deviceId
-      ? `openclaw devices approve ${deviceId.slice(0,16)}…`
-      : 'openclaw devices approve';
-    $('pairingBanner').innerHTML = `
-      <div class="pairing-title">${t('pairingTitle')}</div>
-      <div class="pairing-desc">${t('pairingDesc')}</div>
-      ${deviceId ? `<div class="pairing-code" id="pairingCode" title="Click to copy">${deviceId.slice(0,20)}…<button class="copy-btn" data-val="${deviceId}">⎘</button></div>` : ''}
-      <div class="pairing-desc pairing-or">${t('pairingCmd')}</div>
-      <code class="pairing-cmd">${deviceId ? `openclaw devices approve ${deviceId.slice(0,8)}` : 'openclaw devices approve'}</code>
-    `;
-    // 复制按钮
-    $('pairingBanner').querySelector('.copy-btn')?.addEventListener('click', async (e) => {
-      const val = e.target.dataset.val;
-      await navigator.clipboard.writeText(`openclaw devices approve ${val}`).catch(()=>{});
-      e.target.textContent = '✓';
-      setTimeout(() => { e.target.textContent = '⎘'; }, 2000);
-    });
+    $('pairingCodeText').textContent = deviceId ? deviceId.slice(0,24)+'…' : '—';
+    $('pairingCmd').textContent = deviceId ? `openclaw devices approve ${deviceId.slice(0,16)}` : 'openclaw devices approve';
+    $('pairingCopyBtn').onclick = async () => {
+      const cmd = `openclaw devices approve ${deviceId}`;
+      await navigator.clipboard.writeText(cmd).catch(()=>{});
+      $('pairingCopyBtn').textContent = '✓';
+      setTimeout(()=>{ $('pairingCopyBtn').textContent = '⎘'; }, 2000);
+    };
   } else {
-    $('pairingBanner').style.display = 'none';
+    pairSec.style.display = 'none';
   }
+
+  // 连接成功后显示断联按钮，隐藏品牌标题（节省空间）
+  $('brandArea').style.display = wsConnected ? 'none' : '';
+  $('disconnectInlineBtn').style.display = wsConnected ? '' : 'none';
 
   // Loop section: 只在任务执行中显示（非 idle）
   const loopEl = $('loopSection');
@@ -305,15 +307,17 @@ $('connectBtn').addEventListener('click', async () => {
   await chrome.storage.local.set({gatewayUrl:url,gatewayToken:token,browserName:name,
     gatewayUrlDraft:url,gatewayTokenDraft:token,browserNameDraft:name});
   $('connectBtn').disabled = true;
-  $('connectBtn').textContent = t('connecting');
+  $('connectBtn').textContent = t('connecting') || 'Connecting…';
+  // 不立刻改 UI 状态，等 background 推送真实状态
   try { await chrome.runtime.sendMessage({type:'connect',url,token,name}); } catch(_){}
   setTimeout(async ()=>{ $('connectBtn').disabled=false; $('connectBtn').textContent=t('connect'); await fetchStatus(); },1500);
 });
 
-$('disconnectBtn').addEventListener('click', async () => {
+async function doDisconnect() {
   try { await chrome.runtime.sendMessage({type:'disconnect'}); } catch(_){}
-  render({wsConnected:false,pairingPending:false,tabCount:0,loop:{status:'idle'}});
-});
+  render({wsConnected:false,pairingPending:false,reconnecting:false,gaveUp:false,tabCount:0,loop:{status:'idle'}});
+}
+$('disconnectInlineBtn').addEventListener('click', doDisconnect);
 
 $('toggleToken').addEventListener('click', () => {
   const inp = $('gatewayToken');
@@ -405,6 +409,12 @@ function showToast(msg, isError=false) {
   setTimeout(()=>el.remove(), 2500);
 }
 
+
+// Pairing cancel
+$('pairingCancelBtn').addEventListener('click', async () => {
+  try { await chrome.runtime.sendMessage({type:'disconnect'}); } catch(_){}
+  render({wsConnected:false,pairingPending:false,reconnecting:false,gaveUp:false,tabCount:0,loop:{status:'idle'}});
+});
 // ── Fetch status ──────────────────────────────────────────────────────────
 async function fetchStatus() {
   try {

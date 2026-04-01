@@ -277,3 +277,48 @@ input.input-error { border-color: #ef4444; }
   background: #fef2f2; color: #b91c1c; font-size: 11px;
   font-weight: 500; padding: 6px 10px; border-radius: 8px; margin-bottom: 10px;
 }
+
+/* ─── Disconnect inline btn ─── */
+.disconnect-inline-btn {
+  background: #fee2e2; border: none; border-radius: 7px;
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  cursor: pointer; color: #b91c1c; transition: background .15s;
+}
+.disconnect-inline-btn:hover { background: #fecaca; }
+
+/* ─── Pairing section (full panel) ─── */
+.pairing-section {
+  text-align: center; padding: 20px 16px;
+}
+.pairing-icon { font-size: 32px; margin-bottom: 8px; }
+.pairing-title-big {
+  font-size: 15px; font-weight: 700; color: #1e293b; margin-bottom: 6px;
+}
+.pairing-section .pairing-desc {
+  font-size: 12px; color: #64748b; margin-bottom: 12px; line-height: 1.5;
+}
+.pairing-code-wrap {
+  display: flex; align-items: center; gap: 8px;
+  background: #eff6ff; border-radius: 8px; padding: 8px 12px;
+  margin-bottom: 8px; cursor: pointer;
+}
+.pairing-code-text {
+  flex: 1; font-family: monospace; font-size: 11px; color: #1d4ed8;
+  text-align: left; word-break: break-all;
+}
+.pairing-section .copy-btn {
+  background: #bfdbfe; border: none; border-radius: 5px;
+  padding: 3px 8px; font-size: 12px; cursor: pointer; color: #1d4ed8;
+  flex-shrink: 0; transition: background .15s;
+}
+.pairing-section .copy-btn:hover { background: #93c5fd; }
+.pairing-or {
+  font-size: 11px; color: #94a3b8; margin: 6px 0 4px;
+}
+.pairing-section .pairing-cmd {
+  display: block; background: #f8fafc; border-radius: 7px;
+  padding: 7px 10px; font-size: 11px; color: #374151;
+  font-family: monospace; text-align: left; margin-bottom: 14px;
+  word-break: break-all;
+}
+.pairing-cancel-btn { width: 100%; }
