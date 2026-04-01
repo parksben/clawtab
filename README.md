@@ -5,48 +5,41 @@
 ## Features
 
 - 🔌 **Connect to any OpenClaw Gateway** — local or remote, via WebSocket
-- 👁️ **Tab awareness** — AI agents can list all open tabs, read page content, and capture screenshots
+- 👁️ **Tab awareness** — list all open tabs, read page content, and capture screenshots
 - 🤖 **Agent selector** — choose which agents are allowed to control your browser
-- ⚡ **Execute JS** — agents can run scripts, click elements, fill forms, and navigate pages
+- ⚡ **Execute JS** — run scripts, click elements, fill forms, and navigate pages
 - 🏷️ **Browser identity** — set a custom name so the Gateway knows which browser is connected
 - 💾 **Auto-save** — URL, token, and browser name are remembered across sessions
-- 📌 **Fixed extension ID** — the `key` field in `manifest.json` pins the extension ID, so you never need to update Gateway config after reinstalling
+- 📌 **Fixed extension ID** — pinned via `manifest.json` key, survives reinstalls
+- 🌐 **Bilingual UI** — switch between Chinese and English in the popup
 
 ## Installation
 
-1. Download the latest ZIP: **[clawtab-main.zip](https://github.com/parksben/clawtab/archive/refs/heads/main.zip)**
+1. Download: **[clawtab-main.zip](https://github.com/parksben/clawtab/archive/refs/heads/main.zip)**
 2. Unzip the file
-3. Open Chrome and go to `chrome://extensions/`
-4. Enable **Developer mode** (top-right toggle)
-5. Click **Load unpacked** and select the unzipped folder
+3. Go to `chrome://extensions/` → enable **Developer mode**
+4. Click **Load unpacked** → select the unzipped folder
 
-The extension will always load with the fixed ID: `olfpncdbjlggonplhnlnbhkfianddhmp`
+Fixed extension ID: `olfpncdbjlggonplhnlnbhkfianddhmp`
 
 ## Setup
 
-1. Click the ClawTab icon in your Chrome toolbar
-2. Fill in:
-   - **Gateway URL** — e.g. `ws://localhost:18789` (local) or `wss://your-domain.com` (remote)
-   - **Access Token** — the token configured in `gateway.auth.token`
-   - **Browser Name** — a label to identify this browser in the Gateway (e.g. `my_work_browser`)
-3. Click **Save & Connect**
-4. Once connected, select which **Agents** are allowed to control this browser
+1. Click the ClawTab icon in your toolbar
+2. Fill in **Gateway URL**, **Access Token**, and an optional **Browser Name**
+3. Click **Connect**
+4. Once connected, select which **Agents** can control this browser
 
 ## Gateway Configuration
 
-To allow ClawTab to connect, you need to:
-
-### 1. Enable token auth and whitelist the extension
-
-Edit your OpenClaw config (`~/.openclaw/openclaw.json`):
+Add ClawTab's origin to `gateway.controlUi.allowedOrigins`:
 
 ```json
 {
   "gateway": {
-    "auth": { "mode": "token", "token": "your-token-here" },
+    "auth": { "mode": "token", "token": "your-token" },
     "controlUi": {
       "allowedOrigins": [
-        "http://localhost:18789",
+        "https://your-domain.com",
         "chrome-extension://olfpncdbjlggonplhnlnbhkfianddhmp"
       ]
     }
@@ -54,23 +47,13 @@ Edit your OpenClaw config (`~/.openclaw/openclaw.json`):
 }
 ```
 
-### 2. Restart the Gateway
-
-**Config changes only take effect after a full Gateway restart** — hot reload is not sufficient for `allowedOrigins` changes.
-
-```bash
-# If managed by systemd:
-systemctl restart openclaw-gateway.service
-
-# Or via CLI:
-openclaw gateway stop && openclaw gateway start
-```
-
-> **Fixed ID:** Thanks to the `key` field in `manifest.json`, ClawTab always uses the same extension ID (`olfpncdbjlggonplhnlnbhkfianddhmp`) regardless of where or how many times you reinstall it. You only need to add it to `allowedOrigins` once — no need to update config after reinstalling.
+> ⚠️ **Restart required:** After modifying `allowedOrigins` or `gateway.auth`, you must **fully restart** the OpenClaw Gateway. A hot-reload (SIGUSR1) is **not** sufficient for these settings.
+>
+> ```bash
+> systemctl restart openclaw-gateway
+> ```
 
 ## Supported Commands
-
-Once connected, OpenClaw agents can send the following commands to ClawTab:
 
 | Command | Description |
 |---|---|
@@ -80,11 +63,76 @@ Once connected, OpenClaw agents can send the following commands to ClawTab:
 | `navigate` | Navigate a tab to a URL |
 | `screenshot` | Capture a screenshot of a tab |
 
-## Privacy & Security
+## License
 
-- ClawTab only connects to the Gateway URL you explicitly configure
-- Agent access is restricted to the agents you select in the popup
-- No data is sent to any third-party services
+MIT
+
+---
+
+# ClawTab [中文]
+
+**ClawTab** 是一个 Chrome 扩展，将你的浏览器连接到 [OpenClaw](https://github.com/openclaw/openclaw) Gateway，让 AI Agent 能够感知和控制浏览器标签页。
+
+## 功能特性
+
+- 🔌 **连接任意 OpenClaw Gateway** — 本地或远程，通过 WebSocket
+- 👁️ **标签页感知** — 列出所有标签页、读取页面内容、截图
+- 🤖 **Agent 选择器** — 选择哪些 Agent 可以控制你的浏览器
+- ⚡ **执行 JS** — 运行脚本、点击元素、填写表单、页面导航
+- 🏷️ **浏览器标识** — 设置自定义名称，让 Gateway 识别是哪台浏览器
+- 💾 **自动保存** — URL、Token、浏览器名称在会话间持久保存
+- 📌 **固定 extension ID** — 通过 `manifest.json` key 锁定，重装不变
+- 🌐 **中英文切换** — popup 右上角一键切换语言
+
+## 安装
+
+1. 下载：**[clawtab-main.zip](https://github.com/parksben/clawtab/archive/refs/heads/main.zip)**
+2. 解压
+3. 打开 `chrome://extensions/`，开启右上角**开发者模式**
+4. 点击**加载已解压的扩展程序**，选择解压后的文件夹
+
+固定 Extension ID：`olfpncdbjlggonplhnlnbhkfianddhmp`
+
+## 使用
+
+1. 点击工具栏中的 ClawTab 图标
+2. 填写 **Gateway URL**、**Access Token**，以及可选的**浏览器名称**
+3. 点击**保存并连接**
+4. 连接成功后，勾选允许控制浏览器的 Agent
+
+## Gateway 配置
+
+将 ClawTab 的 origin 加入 `gateway.controlUi.allowedOrigins`：
+
+```json
+{
+  "gateway": {
+    "auth": { "mode": "token", "token": "你的token" },
+    "controlUi": {
+      "allowedOrigins": [
+        "https://你的域名.com",
+        "chrome-extension://olfpncdbjlggonplhnlnbhkfianddhmp"
+      ]
+    }
+  }
+}
+```
+
+> ⚠️ **需要重启：** 修改 `allowedOrigins` 或 `gateway.auth` 后，必须**完整重启** OpenClaw Gateway 才能生效，热重载（SIGUSR1）对这些配置**无效**。
+>
+> ```bash
+> systemctl restart openclaw-gateway
+> ```
+
+## 支持的指令
+
+| 指令 | 描述 |
+|---|---|
+| `get_tabs` | 列出所有标签页 |
+| `get_page_content` | 获取标签页的文本和 HTML |
+| `execute_js` | 在标签页中执行 JavaScript |
+| `navigate` | 导航标签页到指定 URL |
+| `screenshot` | 截取标签页截图 |
 
 ## License
 

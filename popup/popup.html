@@ -15,89 +15,77 @@
         <span class="brand-sub">OpenClaw Browser Client</span>
       </div>
     </div>
-    <div class="status-badge" id="statusBadge">
-      <span class="status-dot" id="statusDot"></span>
-      <span class="status-text" id="statusText">未连接</span>
+    <div class="header-right">
+      <div class="status-badge">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">—</span>
+      </div>
+      <button class="lang-btn" id="langBtn">EN</button>
     </div>
   </div>
 
-  <!-- Config Section -->
-  <div class="section">
-    <div class="section-title">连接配置</div>
-    <div class="form-group">
-      <label for="gatewayUrl">Gateway URL</label>
-      <input
-        type="text"
-        id="gatewayUrl"
-        placeholder="ws://localhost:18789"
-        autocomplete="off"
-        spellcheck="false"
-      />
-    </div>
-    <div class="form-group">
-      <label for="gatewayToken">Access Token</label>
-      <div class="input-row">
-        <input
-          type="password"
-          id="gatewayToken"
-          placeholder="your-gateway-token"
-          autocomplete="off"
-        />
-        <button class="icon-btn" id="toggleToken" title="显示/隐藏 Token">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-            <circle cx="12" cy="12" r="3"/>
-          </svg>
-        </button>
+  <div class="body">
+    <!-- Config Section -->
+    <div class="section">
+      <div class="section-title" data-i18n="config"></div>
+      <div class="form-group">
+        <label>Gateway URL</label>
+        <input type="text" id="gatewayUrl" placeholder="ws://localhost:18789" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="form-group">
+        <label>Access Token</label>
+        <div class="input-row">
+          <input type="password" id="gatewayToken" placeholder="your-gateway-token" autocomplete="off" />
+          <button class="icon-btn" id="toggleToken">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <div class="form-group">
+        <label><span data-i18n="browserName"></span> <span class="label-hint" data-i18n="browserNameHint"></span></label>
+        <input type="text" id="browserName" placeholder="my_work_browser" autocomplete="off" maxlength="40" />
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="connectBtn" data-i18n="connect"></button>
+        <button class="btn btn-secondary" id="disconnectBtn" data-i18n="disconnect"></button>
       </div>
     </div>
-    <div class="form-group">
-      <label for="browserName">浏览器名称 <span class="label-hint">（连接标识，可自定义）</span></label>
-      <input
-        type="text"
-        id="browserName"
-        placeholder="my_work_browser"
-        autocomplete="off"
-        maxlength="40"
-      />
-    </div>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="connectBtn">保存并连接</button>
-      <button class="btn btn-secondary" id="disconnectBtn">断开</button>
-    </div>
-  </div>
 
-  <!-- Agent 选择区（连接后展示） -->
-  <div class="section" id="agentSection" style="display:none;">
-    <div class="section-title">
-      监控 Agent
-      <span class="section-hint">选择哪些 Agent 可以控制浏览器</span>
+    <!-- Agent Section（连接后展示） -->
+    <div class="section" id="agentSection" style="display:none;">
+      <div class="section-title">
+        <span data-i18n="agents"></span>
+        <span class="section-hint" data-i18n="agentsHint"></span>
+      </div>
+      <div id="agentList" class="agent-list">
+        <div class="agent-loading" data-i18n="loading"></div>
+      </div>
     </div>
-    <div id="agentList" class="agent-list">
-      <div class="agent-loading">加载中…</div>
-    </div>
-  </div>
 
-  <!-- Stats Section -->
-  <div class="section">
-    <div class="section-title">运行状态</div>
-    <div class="stats-grid">
-      <div class="stat-item">
-        <div class="stat-label">Gateway</div>
-        <div class="stat-value" id="statGateway">—</div>
+    <!-- Stats Section -->
+    <div class="section">
+      <div class="section-title" data-i18n="status"></div>
+      <div class="stats-grid">
+        <div class="stat-item">
+          <div class="stat-label">Gateway</div>
+          <div class="stat-value" id="statGateway">—</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label" data-i18n="browserIdLabel"></div>
+          <div class="stat-value" id="statBrowserName">—</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-label" data-i18n="tabsLabel"></div>
+          <div class="stat-value" id="statTabs">0</div>
+        </div>
       </div>
-      <div class="stat-item">
-        <div class="stat-label">浏览器标识</div>
-        <div class="stat-value" id="statBrowserName">—</div>
+      <div class="last-cmd">
+        <span class="stat-label" data-i18n="lastCmd"></span>
+        <span class="stat-value cmd-value" id="statLastCmd">—</span>
       </div>
-      <div class="stat-item">
-        <div class="stat-label">监控标签页</div>
-        <div class="stat-value" id="statTabs">0</div>
-      </div>
-    </div>
-    <div class="last-cmd">
-      <span class="stat-label">最后指令：</span>
-      <span class="stat-value cmd-value" id="statLastCmd">—</span>
     </div>
   </div>
 

@@ -1,55 +1,119 @@
 /**
- * popup.js - Popup UI 控制器
+ * popup.js - ClawTab Popup Controller
  */
 
-const $ = (id) => document.getElementById(id);
+// ── i18n ───────────────────────────────────────────────────────────────────
 
-const statusDot = $('statusDot');
-const statusText = $('statusText');
-const gatewayUrlInput = $('gatewayUrl');
-const gatewayTokenInput = $('gatewayToken');
-const connectBtn = $('connectBtn');
-const disconnectBtn = $('disconnectBtn');
-const toggleTokenBtn = $('toggleToken');
-const browserNameInput = $('browserName');
-const statGateway = $('statGateway');
-const statBrowserName = $('statBrowserName');
-const statTabs = $('statTabs');
-const statLastCmd = $('statLastCmd');
-const agentSection = $('agentSection');
-const agentList = $('agentList');
-
-const STATUS_MAP = {
-  connected: { dot: 'connected', text: '已连接' },
-  connecting: { dot: 'connecting', text: '连接中…' },
-  pairing:    { dot: 'connecting', text: '等待配对…' },
-  disconnected: { dot: 'disconnected', text: '未连接' }
+const I18N = {
+  zh: {
+    config: '连接配置',
+    browserName: '浏览器名称',
+    browserNameHint: '（连接标识，可自定义）',
+    connect: '保存并连接',
+    disconnect: '断开',
+    agents: '监控 Agent',
+    agentsHint: '选择哪些 Agent 可以控制浏览器',
+    status: '运行状态',
+    browserIdLabel: '浏览器标识',
+    tabsLabel: '监控标签页',
+    lastCmd: '最后指令：',
+    loading: '加载中…',
+    noAgents: '未找到 Agent',
+    loadFailed: '加载失败',
+    connected: '已连接',
+    connecting: '连接中…',
+    pairing: '等待配对…',
+    disconnected: '未连接',
+    connecting2: '连接中…',
+  },
+  en: {
+    config: 'Connection',
+    browserName: 'Browser Name',
+    browserNameHint: '(custom identifier)',
+    connect: 'Connect',
+    disconnect: 'Disconnect',
+    agents: 'Monitor Agents',
+    agentsHint: 'Select agents allowed to control this browser',
+    status: 'Status',
+    browserIdLabel: 'Browser ID',
+    tabsLabel: 'Active Tabs',
+    lastCmd: 'Last Command:',
+    loading: 'Loading…',
+    noAgents: 'No agents found',
+    loadFailed: 'Failed to load',
+    connected: 'Connected',
+    connecting: 'Connecting…',
+    pairing: 'Awaiting pairing…',
+    disconnected: 'Disconnected',
+    connecting2: 'Connecting…',
+  }
 };
 
-// ── 状态 UI ────────────────────────────────────────────────────────────────
+let currentLang = 'zh';
+
+function t(key) {
+  return I18N[currentLang]?.[key] || I18N.zh[key] || key;
+}
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    el.textContent = t(el.dataset.i18n);
+  });
+  // 更新动态文字
+  const statusTextEl = document.getElementById('statusText');
+  if (statusTextEl && statusTextEl.dataset.status) {
+    statusTextEl.textContent = t(statusTextEl.dataset.status) || statusTextEl.dataset.status;
+  }
+  document.getElementById('langBtn').textContent = currentLang === 'zh' ? 'EN' : '中文';
+}
+
+// ── DOM refs ───────────────────────────────────────────────────────────────
+
+const $ = id => document.getElementById(id);
+const statusDot      = $('statusDot');
+const statusText     = $('statusText');
+const langBtn        = $('langBtn');
+const gatewayUrlInput  = $('gatewayUrl');
+const gatewayTokenInput = $('gatewayToken');
+const browserNameInput  = $('browserName');
+const connectBtn     = $('connectBtn');
+const disconnectBtn  = $('disconnectBtn');
+const toggleTokenBtn = $('toggleToken');
+const statGateway    = $('statGateway');
+const statBrowserName = $('statBrowserName');
+const statTabs       = $('statTabs');
+const statLastCmd    = $('statLastCmd');
+const agentSection   = $('agentSection');
+const agentList      = $('agentList');
+
+// ── Status UI ─────────────────────────────────────────────────────────────
+
+const STATUS_DOT = {
+  connected: 'connected',
+  connecting: 'connecting',
+  pairing: 'connecting',
+  disconnected: 'disconnected',
+};
 
 function updateStatusUI(status, data = {}) {
-  const s = STATUS_MAP[status] || STATUS_MAP.disconnected;
-  statusDot.className = `status-dot ${s.dot}`;
-  statusText.textContent = s.text;
+  const dotClass = STATUS_DOT[status] || 'disconnected';
+  statusDot.className = `status-dot ${dotClass}`;
+  statusText.dataset.status = status;
+  statusText.textContent = t(status) || status;
 
   if (data.wsUrl) {
-    let displayUrl = data.wsUrl;
-    try { const u = new URL(data.wsUrl); displayUrl = u.host; } catch (_) {}
-    statGateway.textContent = displayUrl;
+    let display = data.wsUrl;
+    try { display = new URL(data.wsUrl).host; } catch (_) {}
+    statGateway.textContent = display;
     statGateway.title = data.wsUrl;
   } else if (status === 'disconnected') {
     statGateway.textContent = '—';
   }
 
-  if (data.browserName !== undefined) {
-    statBrowserName.textContent = data.browserName || '—';
-  }
-
+  if (data.browserName !== undefined) statBrowserName.textContent = data.browserName || '—';
   if (data.tabCount !== undefined) statTabs.textContent = data.tabCount;
   if (data.lastCommand) statLastCmd.textContent = data.lastCommand;
 
-  // 连接成功时展示 agent 选择区
   if (status === 'connected') {
     agentSection.style.display = '';
     loadAgents();
@@ -58,18 +122,18 @@ function updateStatusUI(status, data = {}) {
   }
 }
 
-// ── Agent 列表 ─────────────────────────────────────────────────────────────
+// ── Agent list ────────────────────────────────────────────────────────────
 
 async function loadAgents() {
-  agentList.innerHTML = '<div class="agent-loading">加载中…</div>';
+  agentList.innerHTML = `<div class="agent-loading">${t('loading')}</div>`;
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'agents_list' });
     const agents = resp?.agents || [];
     const { selectedAgents } = await chrome.storage.local.get(['selectedAgents']);
-    const selected = new Set(selectedAgents || agents); // 默认全选
+    const selected = new Set(selectedAgents || agents);
 
     if (agents.length === 0) {
-      agentList.innerHTML = '<div class="agent-loading">未找到 Agent</div>';
+      agentList.innerHTML = `<div class="agent-loading">${t('noAgents')}</div>`;
       return;
     }
 
@@ -87,38 +151,28 @@ async function loadAgents() {
 
       const icon = document.createElement('span');
       icon.className = 'agent-icon';
-      icon.textContent = agentIconFor(agentId);
+      icon.textContent = agentId === 'main' ? '🤖' : agentId.includes('wechat') ? '💬' : '🔹';
 
       const label = document.createElement('span');
       label.className = 'agent-label';
       label.textContent = agentId;
 
-      row.appendChild(cb);
-      row.appendChild(icon);
-      row.appendChild(label);
+      row.append(cb, icon, label);
       agentList.appendChild(row);
     });
   } catch (e) {
-    agentList.innerHTML = '<div class="agent-loading">加载失败</div>';
+    agentList.innerHTML = `<div class="agent-loading">${t('loadFailed')}</div>`;
   }
 }
 
-function agentIconFor(id) {
-  if (id === 'main') return '🤖';
-  if (id.includes('wechat')) return '💬';
-  if (id.includes('dajin') || id.includes('大紧')) return '⚡';
-  return '🔹';
-}
-
 async function saveSelectedAgents() {
-  const checkboxes = agentList.querySelectorAll('input[type=checkbox]');
-  const selected = [...checkboxes].filter(cb => cb.checked).map(cb => cb.value);
+  const selected = [...agentList.querySelectorAll('input[type=checkbox]')]
+    .filter(cb => cb.checked).map(cb => cb.value);
   await chrome.storage.local.set({ selectedAgents: selected });
-  // 通知 background 更新
   chrome.runtime.sendMessage({ type: 'update_selected_agents', agents: selected }).catch(() => {});
 }
 
-// ── 配置草稿自动保存（不需要点按钮）─────────────────────────────────────────
+// ── Draft auto-save ───────────────────────────────────────────────────────
 
 let draftTimer = null;
 function scheduleDraftSave() {
@@ -127,117 +181,101 @@ function scheduleDraftSave() {
 }
 
 async function saveDraft() {
-  const url = gatewayUrlInput.value.trim();
-  const token = gatewayTokenInput.value.trim();
-  const name = browserNameInput.value.trim();
-  await chrome.storage.local.set({ gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name });
+  await chrome.storage.local.set({
+    gatewayUrlDraft: gatewayUrlInput.value.trim(),
+    gatewayTokenDraft: gatewayTokenInput.value.trim(),
+    browserNameDraft: browserNameInput.value.trim(),
+  });
 }
 
 gatewayUrlInput.addEventListener('input', scheduleDraftSave);
 gatewayTokenInput.addEventListener('input', scheduleDraftSave);
 browserNameInput.addEventListener('input', scheduleDraftSave);
 
-// ── 加载已保存配置 ──────────────────────────────────────────────────────────
+// ── Load config ───────────────────────────────────────────────────────────
 
 async function loadConfig() {
   const data = await chrome.storage.local.get([
     'gatewayUrl', 'gatewayToken', 'browserName',
-    'gatewayUrlDraft', 'gatewayTokenDraft', 'browserNameDraft'
+    'gatewayUrlDraft', 'gatewayTokenDraft', 'browserNameDraft',
+    'lang',
   ]);
-  // 优先使用草稿（最近输入的），其次用已保存的成功连接配置
   gatewayUrlInput.value   = data.gatewayUrlDraft   || data.gatewayUrl   || '';
   gatewayTokenInput.value = data.gatewayTokenDraft || data.gatewayToken || '';
   browserNameInput.value  = data.browserNameDraft  || data.browserName  || '';
+  if (data.lang) currentLang = data.lang;
+  applyI18n();
 }
 
-// ── 获取 background 状态 ───────────────────────────────────────────────────
+// ── Fetch status ──────────────────────────────────────────────────────────
 
 async function fetchStatus() {
   try {
     const resp = await chrome.runtime.sendMessage({ type: 'get_status' });
-    if (resp) {
-      updateStatusUI(resp.status, {
-        wsUrl: resp.wsUrl,
-        tabCount: resp.tabCount,
-        lastCommand: resp.lastCommand
-      });
-    }
+    if (resp) updateStatusUI(resp.status, { wsUrl: resp.wsUrl, browserName: resp.browserName, tabCount: resp.tabCount, lastCommand: resp.lastCommand });
   } catch (e) {
     updateStatusUI('disconnected');
   }
 }
 
-// ── 连接 ────────────────────────────────────────────────────────────────────
+// ── Connect ───────────────────────────────────────────────────────────────
 
 connectBtn.addEventListener('click', async () => {
   const url   = gatewayUrlInput.value.trim();
   const token = gatewayTokenInput.value.trim();
   const name  = browserNameInput.value.trim() || ('Browser-' + Math.random().toString(36).slice(2, 6));
 
-  if (!url) {
-    gatewayUrlInput.focus();
-    gatewayUrlInput.classList.add('input-error');
-    setTimeout(() => gatewayUrlInput.classList.remove('input-error'), 1500);
-    return;
-  }
-  if (!token) {
-    gatewayTokenInput.focus();
-    gatewayTokenInput.classList.add('input-error');
-    setTimeout(() => gatewayTokenInput.classList.remove('input-error'), 1500);
-    return;
-  }
+  if (!url) { gatewayUrlInput.classList.add('input-error'); setTimeout(() => gatewayUrlInput.classList.remove('input-error'), 1500); gatewayUrlInput.focus(); return; }
+  if (!token) { gatewayTokenInput.classList.add('input-error'); setTimeout(() => gatewayTokenInput.classList.remove('input-error'), 1500); gatewayTokenInput.focus(); return; }
 
-  // 保存为"已确认"配置
-  await chrome.storage.local.set({
-    gatewayUrl: url, gatewayToken: token, browserName: name,
-    gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name
-  });
+  await chrome.storage.local.set({ gatewayUrl: url, gatewayToken: token, browserName: name, gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name });
 
   updateStatusUI('connecting', { wsUrl: url });
   connectBtn.disabled = true;
-  connectBtn.textContent = '连接中…';
+  connectBtn.textContent = t('connecting2');
 
-  try {
-    await chrome.runtime.sendMessage({ type: 'connect', url, token, name });
-  } catch (e) {
-    console.error('Connect error:', e);
-  }
+  try { await chrome.runtime.sendMessage({ type: 'connect', url, token, name }); } catch (e) {}
 
   setTimeout(async () => {
     connectBtn.disabled = false;
-    connectBtn.textContent = '保存并连接';
+    connectBtn.textContent = t('connect');
     await fetchStatus();
   }, 1500);
 });
 
-// ── 断开 ────────────────────────────────────────────────────────────────────
+// ── Disconnect ────────────────────────────────────────────────────────────
 
 disconnectBtn.addEventListener('click', async () => {
   try { await chrome.runtime.sendMessage({ type: 'disconnect' }); } catch (e) {}
   updateStatusUI('disconnected', { tabCount: 0, lastCommand: '—' });
 });
 
-// ── 显示/隐藏 Token ──────────────────────────────────────────────────────────
+// ── Toggle token visibility ───────────────────────────────────────────────
 
 toggleTokenBtn.addEventListener('click', () => {
-  const isPassword = gatewayTokenInput.type === 'password';
-  gatewayTokenInput.type = isPassword ? 'text' : 'password';
+  gatewayTokenInput.type = gatewayTokenInput.type === 'password' ? 'text' : 'password';
 });
 
-// ── 监听来自 background 的状态推送 ───────────────────────────────────────────
+// ── Language toggle ───────────────────────────────────────────────────────
 
-chrome.runtime.onMessage.addListener((msg) => {
+langBtn.addEventListener('click', async () => {
+  currentLang = currentLang === 'zh' ? 'en' : 'zh';
+  await chrome.storage.local.set({ lang: currentLang });
+  applyI18n();
+  // 重新渲染 agent loading 状态文字（如果在加载中）
+  const loadingEl = agentList.querySelector('.agent-loading');
+  if (loadingEl) loadingEl.textContent = t('loading');
+});
+
+// ── Background status push ────────────────────────────────────────────────
+
+chrome.runtime.onMessage.addListener(msg => {
   if (msg.type === 'status_update') {
-    updateStatusUI(msg.status, {
-      wsUrl: msg.wsUrl,
-      browserName: msg.browserName,
-      tabCount: msg.tabCount,
-      lastCommand: msg.lastCommand
-    });
+    updateStatusUI(msg.status, { wsUrl: msg.wsUrl, browserName: msg.browserName, tabCount: msg.tabCount, lastCommand: msg.lastCommand });
   }
 });
 
-// ── 初始化 ───────────────────────────────────────────────────────────────────
+// ── Init ──────────────────────────────────────────────────────────────────
 
 (async () => {
   await loadConfig();
