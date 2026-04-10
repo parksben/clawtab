@@ -102,6 +102,20 @@ input.input-error { border-color: #ef4444; }
   font-weight: 600; cursor: pointer; transition: background .15s;
 }
 .btn-danger:hover { background: #fecaca; }
+.chat-btn-wrap { padding: 2px 0 4px; }
+.btn-chat {
+  width: 100%; padding: 9px 12px;
+  background: #6366f1; color: #fff;
+  border: none; border-radius: 9px;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: background .15s;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+}
+.btn-chat::before { content: '💬'; font-size: 13px; }
+.btn-chat:hover { background: #4f46e5; }
+.btn-chat.chat-open { background: #f1f5f9; color: #475569; }
+.btn-chat.chat-open::before { content: '✕'; font-size: 13px; }
+.btn-chat.chat-open:hover { background: #e2e8f0; }
 
 /* ─── Pairing banner ─── */
 .pairing-banner {

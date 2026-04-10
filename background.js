@@ -58,6 +58,7 @@ const S = {
 
   // Stats
   tabCount: 0, lastCmd: '',
+  sidebarOpen: false,
 };
 
 // ═══════════════════════════════════════════════════════
@@ -137,6 +138,7 @@ function broadcastStatus() {
     wsUrl:         S.wsUrl,
     tabCount:      S.tabCount,
     lastCmd:       S.lastCmd,
+    sidebarOpen:   S.sidebarOpen,
     loop: {
       status:         S.loop.status,
       goal:           S.loop.goal,
@@ -951,9 +953,9 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         sendResponse({ok:true}); break;
       case 'get_status':
         sendResponse({wsConnected:S.wsConnected,pairingPending:S.pairingPending,
-          reconnecting: !S.wsConnected && !!S.wsUrl && !S.pairingPending,  // 有配置但未连接 = 正在重连（配对等待中不算重连）
+          reconnecting: !S.wsConnected && !!S.wsUrl && !S.pairingPending,
           deviceId:S.deviceIdentity?.id||'',
-          browserId:S.browserId,
+          browserId:S.browserId, sidebarOpen:S.sidebarOpen,
           wsUrl:S.wsUrl,tabCount:S.tabCount,lastCmd:S.lastCmd,loop:{
             status:S.loop.status,goal:S.loop.goal,agentId:S.loop.agentId,
             stepIndex:S.loop.stepIndex,history:S.loop.history.slice(-8),
@@ -1003,6 +1005,20 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
           } catch(e) { sendResponse({ok:false, agents:[]}); }
         })();
         return true;
+
+      case 'sidebar_opened':
+        S.sidebarOpen = true; broadcastStatus(); sendResponse({ok:true}); break;
+
+      case 'sidebar_closed':
+        S.sidebarOpen = false; broadcastStatus(); sendResponse({ok:true}); break;
+
+      case 'close_sidebar':
+        S.sidebarOpen = false;
+        // Disable panel (closes it), then re-enable so it can be opened again
+        chrome.sidePanel.setOptions({ path: 'sidebar/sidebar.html', enabled: false })
+          .then(() => chrome.sidePanel.setOptions({ path: 'sidebar/sidebar.html', enabled: true }))
+          .catch(()=>{});
+        broadcastStatus(); sendResponse({ok:true}); break;
 
       default: sendResponse({ok:false,error:'unknown'});
     }

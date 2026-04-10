@@ -353,3 +353,13 @@ chrome.runtime.onMessage.addListener(msg => {
 
 // ── Boot ───────────────────────────────────────────────────────────────────
 init();
+
+// Notify background this sidebar is open
+chrome.runtime.sendMessage({ type: 'sidebar_opened' }).catch(()=>{});
+
+// Notify background when user closes the sidebar via Chrome's built-in UI
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    chrome.runtime.sendMessage({ type: 'sidebar_closed' }).catch(()=>{});
+  }
+});

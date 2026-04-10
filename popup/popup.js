@@ -50,6 +50,9 @@ const I18N = {
     taskDone:     'Done',
     taskFailed:   'Failed',
     taskCancelled:'Cancelled',
+    // Chat sidebar
+    openChat: '与 OpenClaw 聊天',
+    hideChat: '隐藏聊天窗口',
   },
   zh: {
     config:          '连接配置',
@@ -84,6 +87,9 @@ const I18N = {
     taskDone:     '已完成',
     taskFailed:   '失败',
     taskCancelled:'已取消',
+    // Chat sidebar
+    openChat: '与 OpenClaw 聊天',
+    hideChat: '隐藏聊天窗口',
   },
 };
 
@@ -137,7 +143,7 @@ function render(data) {
   // UI 完全由 background 状态机驱动，background 只在状态变化时 broadcastStatus
   lastData = data;
   const { wsConnected, pairingPending, reconnecting, gaveUp, deviceId,
-          loop, browserId, wsUrl, tabCount } = data;
+          loop, browserId, wsUrl, tabCount, sidebarOpen } = data;
   const loopStatus = loop?.status || 'idle';
 
   // ── Status badge ──
@@ -176,6 +182,13 @@ function render(data) {
     hide('configSection'); hide('pairingSection');
     show('statsBar');
     hide('settingsWrap');
+    // Chat button
+    show('chatBtnWrap');
+    const chatBtn = document.getElementById('chatBtn');
+    if (chatBtn) {
+      chatBtn.textContent = sidebarOpen ? t('hideChat') : t('openChat');
+      chatBtn.className = 'btn btn-chat' + (sidebarOpen ? ' chat-open' : '');
+    }
     // Loop section only when task is running
     const hasTask = loopStatus !== 'idle';
     if (hasTask) { show('loopSection'); renderLoop(loop); }
@@ -184,13 +197,13 @@ function render(data) {
     show('brandArea'); show('disconnectInlineBtn');
   } else if (pairingPending) {
     hide('configSection'); show('pairingSection');
-    hide('statsBar'); hide('loopSection');
+    hide('statsBar'); hide('loopSection'); hide('chatBtnWrap');
     show('settingsWrap');
     show('brandArea'); hide('disconnectInlineBtn');
     renderPairing(deviceId);
   } else {
     show('configSection'); hide('pairingSection');
-    hide('statsBar'); hide('loopSection');
+    hide('statsBar'); hide('loopSection'); hide('chatBtnWrap');
     show('settingsWrap');
     show('brandArea'); hide('disconnectInlineBtn');
     const tip = document.getElementById('retryTip');
@@ -341,6 +354,19 @@ document.getElementById('toggleToken').addEventListener('click', () => {
 // Cancel task
 document.getElementById('cancelBtn').addEventListener('click', async () => {
   try { await chrome.runtime.sendMessage({ type:'cancel' }); } catch(_) {}
+});
+
+// Chat sidebar toggle — must open side panel directly here (user gesture context)
+document.getElementById('chatBtn').addEventListener('click', async () => {
+  if (lastData?.sidebarOpen) {
+    try { await chrome.runtime.sendMessage({ type: 'close_sidebar' }); } catch(_) {}
+  } else {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.windowId) await chrome.sidePanel.open({ windowId: tab.windowId });
+      await chrome.runtime.sendMessage({ type: 'sidebar_opened' });
+    } catch(_) {}
+  }
 });
 
 // Pairing cancel
