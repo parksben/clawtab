@@ -232,3 +232,16 @@ body {
 }
 .sb-send-btn:hover:not(:disabled) { background: #4f46e5; transform: scale(1.05); }
 .sb-send-btn:disabled { background: #c7d2fe; cursor: not-allowed; }
+
+/* ─── Disconnected input state ─── */
+.sb-input-area.sb-disconnected {
+  background: #f8fafc;
+  border-top-color: #f1f5f9;
+}
+.sb-input:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+  cursor: not-allowed;
+  border-color: #e2e8f0;
+}
+.sb-input:disabled::placeholder { color: #cbd5e1; }

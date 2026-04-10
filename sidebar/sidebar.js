@@ -7,6 +7,7 @@
 
 const STATE = {
   wsConnected:   false,
+  reconnecting:  false,
   channelName:   '',
   selectedAgent: 'main',
   lastMsgId:     null,
@@ -239,18 +240,33 @@ async function sendMessage() {
 // ── Status ─────────────────────────────────────────────────────────────────
 
 function updateStatus() {
-  const dot  = document.getElementById('statusDot');
-  const text = document.getElementById('statusText');
-  const btn  = document.getElementById('sendBtn');
+  const dot       = document.getElementById('statusDot');
+  const text      = document.getElementById('statusText');
+  const btn       = document.getElementById('sendBtn');
+  const input     = document.getElementById('msgInput');
+  const inputArea = document.querySelector('.sb-input-area');
 
   if (STATE.wsConnected) {
-    dot.className  = 'sb-status-dot connected';
-    text.textContent = '已连接';
-    btn.disabled   = false;
+    dot.className     = 'sb-status-dot connected';
+    text.textContent  = '已连接';
+    btn.disabled      = false;
+    input.disabled    = false;
+    input.placeholder = '发送消息… (Enter 发送，Shift+Enter 换行)';
+    inputArea?.classList.remove('sb-disconnected');
+  } else if (STATE.reconnecting) {
+    dot.className     = 'sb-status-dot connecting';
+    text.textContent  = '重连中…';
+    btn.disabled      = true;
+    input.disabled    = true;
+    input.placeholder = '重连中，请稍候…';
+    inputArea?.classList.add('sb-disconnected');
   } else {
-    dot.className  = 'sb-status-dot';
-    text.textContent = '未连接';
-    btn.disabled   = true;
+    dot.className     = 'sb-status-dot';
+    text.textContent  = '未连接';
+    btn.disabled      = true;
+    input.disabled    = true;
+    input.placeholder = '请先在插件中连接 OpenClaw';
+    inputArea?.classList.add('sb-disconnected');
   }
 }
 
@@ -298,6 +314,7 @@ async function init() {
     const s = await bg({ type: 'get_status' });
     if (s) {
       STATE.wsConnected = s.wsConnected || false;
+      STATE.reconnecting = s.reconnecting || false;
       STATE.channelName = s.browserId || '';
     }
   } catch (_) {}
@@ -335,8 +352,9 @@ document.getElementById('agentSelect').addEventListener('change', e => {
 chrome.runtime.onMessage.addListener(msg => {
   if (msg.type !== 'status_update') return;
   const wasConnected  = STATE.wsConnected;
-  STATE.wsConnected   = msg.wsConnected || false;
-  STATE.channelName   = msg.browserId   || STATE.channelName;
+  STATE.wsConnected   = msg.wsConnected  || false;
+  STATE.reconnecting  = msg.reconnecting || false;
+  STATE.channelName   = msg.browserId    || STATE.channelName;
   updateStatus();
 
   if (!wasConnected && STATE.wsConnected) {
