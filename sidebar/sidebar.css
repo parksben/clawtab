@@ -374,4 +374,14 @@ body {
   border-radius: 3px;
   opacity: 0.7;
 }
-.sb-attach-tag-del:hover { background: #c4b5fd; opacity: 1; }
+/* ─── Send error inline message ─── */
+.sb-send-error {
+  align-self: stretch;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  color: #b91c1c;
+  font-size: 11px;
+  padding: 7px 11px;
+  line-height: 1.5;
+}

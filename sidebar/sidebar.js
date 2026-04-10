@@ -343,11 +343,21 @@ function buildMsgNode(msg) {
   return wrap;
 }
 
+function appendErrorNode(text) {
+  const el = document.getElementById('messages');
+  const emptyEl = el.querySelector('.sb-empty');
+  if (emptyEl) el.innerHTML = '';
+  const node = document.createElement('div');
+  node.className = 'sb-send-error';
+  node.textContent = text;
+  el.appendChild(node);
+  el.scrollTop = el.scrollHeight;
+}
+
 function appendMsgNode(msg) {
   const el = document.getElementById('messages');
   const emptyEl = el.querySelector('.sb-empty');
   if (emptyEl) el.innerHTML = ''; // clear empty state on first real message
-
   const node = buildMsgNode(msg);
   if (node) {
     el.appendChild(node);
@@ -374,7 +384,11 @@ async function fetchHistory() {
       sessionKey: sessionKey(),
       after:      STATE.lastMsgId,
     });
-    if (!res?.ok || !res.messages?.length) return;
+    if (!res?.ok) {
+      console.warn('[Sidebar] fetchHistory failed:', res?.error);
+      return;
+    }
+    if (!res.messages?.length) return;
 
     const freshMsgs = [];
     for (const m of res.messages) {
@@ -439,11 +453,18 @@ async function sendMessage() {
   appendMsgNode(localMsg);
 
   try {
-    await bg({
+    const res = await bg({
       type:       'sidebar_ensure_and_send',
       sessionKey: sessionKey(),
       message:    fullText,
     });
+    if (!res?.ok) {
+      // Send failed — show inline error, don't enter waiting state
+      const errMsg = res?.error || '未知错误，请检查连接后重试';
+      console.warn('[Sidebar] send failed:', errMsg);
+      appendErrorNode(errMsg);
+      return; // finally block will re-enable the send button
+    }
     // Show thinking indicator and lock send until agent replies
     STATE.waiting = true;
     updateSendBtn();
@@ -456,7 +477,8 @@ async function sendMessage() {
       updateSendBtn();
     }, 60000);
   } catch (e) {
-    console.warn('[Sidebar] send failed:', e.message);
+    console.warn('[Sidebar] send exception:', e.message);
+    appendErrorNode('发送异常：' + e.message);
   } finally {
     STATE.sending = false;
     if (!STATE.waiting) updateSendBtn();

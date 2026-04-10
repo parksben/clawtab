@@ -383,7 +383,10 @@ function wsScheduleReconnect() {
 
 async function ensureSession() {
   try { await wsRequest('sessions.create',{channel:'webchat',sessionKey:S.sessionKey},8000); S.sessionExists=true; }
-  catch(e) { if(e.code==='SESSION_EXISTS'||e.message?.includes('exists')) S.sessionExists=true; }
+  catch(e) {
+    if(e.code==='SESSION_EXISTS'||e.message?.includes('exists')) { S.sessionExists=true; return; }
+    console.warn('[ClawTab] ensureSession failed (non-fatal):', e.message, '| code:', e.code);
+  }
 }
 
 async function syncLastSeenId() {
@@ -987,14 +990,26 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
 
       case 'sidebar_ensure_and_send':
         (async()=>{
+          // Explicit WS check — wsRequest throws "not connected" otherwise
+          if (!S.wsConnected || !S.ws || S.ws.readyState !== WebSocket.OPEN) {
+            const wsState = S.ws ? ['CONNECTING','OPEN','CLOSING','CLOSED'][S.ws.readyState] : 'NULL';
+            console.warn('[ClawTab] sidebar_ensure_and_send: WS not ready, state='+wsState);
+            sendResponse({ok:false, error:`WebSocket 未连接（${wsState}），请等待重连后重试`});
+            return;
+          }
           try {
-            // Try to create session; ignore errors — agent sessions are created
-            // by the agent itself, this is best-effort only
+            // Create session idempotently; only warn on unexpected errors
             await wsRequest('sessions.create',{channel:'webchat',sessionKey:msg.sessionKey},8000)
-              .catch(()=>{});
+              .catch(e => {
+                const isExists = e.code?.includes('EXIST') || e.message?.toLowerCase().includes('exist');
+                if (!isExists) console.warn('[ClawTab] sidebar sessions.create warning:', e.message, '| code:', e.code);
+              });
             await wsRequest('chat.send',{sessionKey:msg.sessionKey,message:msg.message,deliver:true},10000);
             sendResponse({ok:true});
-          } catch(e) { sendResponse({ok:false, error:e.message}); }
+          } catch(e) {
+            console.error('[ClawTab] sidebar_ensure_and_send failed:', e.message, '| code:', e.code);
+            sendResponse({ok:false, error:e.message});
+          }
         })();
         return true;
 
