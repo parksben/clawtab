@@ -1,6 +1,14 @@
 /* ─── Reset ─── */
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 
+/* ─── Lucide SVG icons ─── */
+.icon {
+  display: inline-block; vertical-align: middle; flex-shrink: 0;
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round; overflow: visible;
+}
+.icon-lg { stroke-width: 1.5; }
+
 body {
   height: 100vh;
   background: #f1f5f9;

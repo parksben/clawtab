@@ -187,8 +187,8 @@ function render(data) {
     const chatBtn = document.getElementById('chatBtn');
     if (chatBtn) {
     chatBtn.innerHTML = sidebarOpen
-      ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>${t('hideChat')}`
-      : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${t('openChat')}`;
+      ? `${icon('arrow-right-to-line', 14)}${t('hideChat')}`
+      : `${icon('message-square', 14)}${t('openChat')}`;
     chatBtn.className = 'btn btn-chat' + (sidebarOpen ? ' chat-open' : '');
     }
     // Loop section only when task is running

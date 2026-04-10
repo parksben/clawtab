@@ -118,13 +118,6 @@ function formatText(raw) {
     .replace(/\n/g, '<br>');
 }
 
-// Lucide "message-square" outline icon for empty states
-const EMPTY_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"
-  viewBox="0 0 24 24" fill="none" stroke="currentColor"
-  stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-</svg>`;
-
 // ── Thinking indicator ────────────────────────────────────────────────────
 
 function showThinking() {
@@ -289,7 +282,7 @@ function renderAll() {
   if (!STATE.wsConnected) {
     el.innerHTML = `
       <div class="sb-empty">
-        <div class="sb-empty-icon">${EMPTY_ICON_SVG}</div>
+        <div class="sb-empty-icon">${icon('message-square', 40)}</div>
         <div>${sbt('emptyConnect')}</div>
       </div>`;
     return;
@@ -307,7 +300,7 @@ function renderAll() {
   if (visible.length === 0) {
     el.innerHTML = `
       <div class="sb-empty">
-        <div class="sb-empty-icon">${EMPTY_ICON_SVG}</div>
+        <div class="sb-empty-icon">${icon('message-square', 40)}</div>
         <div>${sbt('emptyChat').replace('{agent}', `<strong>${STATE.selectedAgent}</strong>`)}</div>
       </div>`;
     return;

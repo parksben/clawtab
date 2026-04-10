@@ -1,0 +1,105 @@
+/**
+ * shared/icons.js
+ * Single source of truth for all Lucide SVG icons used in ClawTab.
+ *
+ * Injects a hidden <svg> sprite into <head> so any page that loads this
+ * script can reference symbols via  <svg><use href="#icon-NAME"></use></svg>
+ * or call  icon('NAME', size)  to get an HTML string.
+ *
+ * CSS on .icon sets the common stroke presentation so paths stay clean.
+ */
+(function () {
+
+  // ── Icon path definitions ──────────────────────────────────────────────
+  // Only the inner SVG paths — viewBox is always 0 0 24 24.
+
+  const ICONS = {
+    // Action / navigation
+    'send':
+      '<line x1="22" y1="2" x2="11" y2="13"/>' +
+      '<polygon points="22 2 15 22 11 13 2 9 22 2"/>',
+
+    'arrow-right-to-line':           // "hide/collapse right panel"
+      '<path d="M17 12H3"/>' +
+      '<path d="m11 18 6-6-6-6"/>' +
+      '<path d="M21 5v14"/>',
+
+    'copy':
+      '<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/>' +
+      '<path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
+
+    // Chat / messaging
+    'message-square':
+      '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+
+    // Controls
+    'settings':
+      '<circle cx="12" cy="12" r="3"/>' +
+      '<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06' +
+      'a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09' +
+      'A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06' +
+      'A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09' +
+      'A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06' +
+      'A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09' +
+      'a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06' +
+      'A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09' +
+      'a1.65 1.65 0 0 0-1.51 1z"/>',
+
+    'power-off':
+      '<path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>' +
+      '<line x1="12" y1="2" x2="12" y2="12"/>',
+
+    'eye':
+      '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>' +
+      '<circle cx="12" cy="12" r="3"/>',
+
+    // Status / indicators
+    'alert-triangle':
+      '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/>' +
+      '<path d="M12 9v4"/>' +
+      '<path d="M12 17h.01"/>',
+
+    'link':
+      '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>' +
+      '<path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+
+    // Picker
+    'crosshair':
+      '<circle cx="12" cy="12" r="9"/>' +
+      '<line x1="12" y1="3" x2="12" y2="7"/>' +
+      '<line x1="12" y1="17" x2="12" y2="21"/>' +
+      '<line x1="3" y1="12" x2="7" y2="12"/>' +
+      '<line x1="17" y1="12" x2="21" y2="12"/>',
+  };
+
+  // ── Inject sprite into <head> ──────────────────────────────────────────
+  const NS  = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.style.cssText = 'display:none;position:absolute;width:0;height:0;overflow:hidden';
+
+  for (const [name, paths] of Object.entries(ICONS)) {
+    const sym = document.createElementNS(NS, 'symbol');
+    sym.setAttribute('id', 'icon-' + name);
+    sym.setAttribute('viewBox', '0 0 24 24');
+    sym.innerHTML = paths;
+    svg.appendChild(sym);
+  }
+
+  document.head.appendChild(svg);
+
+  // ── icon() helper for JS-generated HTML ───────────────────────────────
+  /**
+   * Returns an <svg> HTML string referencing the sprite symbol.
+   * @param {string} name   - icon key (see ICONS above)
+   * @param {number} [size] - width/height in px (default 15)
+   * @param {string} [cls]  - extra CSS classes for the <svg> element
+   */
+  window.icon = function (name, size, cls) {
+    const s = size || 15;
+    const c = cls ? ' ' + cls : '';
+    return '<svg class="icon' + c + '" width="' + s + '" height="' + s +
+           '" aria-hidden="true"><use href="#icon-' + name + '"></use></svg>';
+  };
+
+})();
