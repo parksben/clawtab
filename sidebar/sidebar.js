@@ -3,6 +3,34 @@
  * Chat UI for communicating with OpenClaw agents via the clawtab session.
  */
 
+// ── I18N ───────────────────────────────────────────────────────────────────
+
+const SB_I18N = {
+  en: {
+    connected:    'Connected',
+    disconnected: 'Not connected',
+    reconnecting: 'Reconnecting…',
+    placeholderOn:  'Message… (Enter to send, Shift+Enter for newline)',
+    placeholderOff: 'Connect OpenClaw in the extension popup first',
+    placeholderReconnecting: 'Reconnecting, please wait…',
+    emptyConnect: 'Connect OpenClaw in the extension popup first',
+    emptyChat:    'Send a message to {agent} to start chatting',
+  },
+  zh: {
+    connected:    '已连接',
+    disconnected: '未连接',
+    reconnecting: '重连中…',
+    placeholderOn:  '发消息… (Enter 发送，Shift+Enter 换行)',
+    placeholderOff: '请先在插件中连接 OpenClaw',
+    placeholderReconnecting: '重连中，请稍候…',
+    emptyConnect: '请先在插件面板中连接 OpenClaw',
+    emptyChat:    '向 {agent} 发消息，开始对话',
+  },
+};
+
+let sbLang = 'zh';
+const sbt = key => SB_I18N[sbLang]?.[key] ?? SB_I18N.zh[key] ?? key;
+
 // ── State ──────────────────────────────────────────────────────────────────
 
 const STATE = {
@@ -84,6 +112,13 @@ function formatText(raw) {
     .replace(/\n/g, '<br>');
 }
 
+// Lucide "message-square" outline icon for empty states
+const EMPTY_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"
+  viewBox="0 0 24 24" fill="none" stroke="currentColor"
+  stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+</svg>`;
+
 // ── Render ─────────────────────────────────────────────────────────────────
 
 function renderAll() {
@@ -92,8 +127,8 @@ function renderAll() {
   if (!STATE.wsConnected) {
     el.innerHTML = `
       <div class="sb-empty">
-        <div class="sb-empty-icon">🦞</div>
-        <div>请先在插件面板中连接 OpenClaw</div>
+        <div class="sb-empty-icon">${EMPTY_ICON_SVG}</div>
+        <div>${sbt('emptyConnect')}</div>
       </div>`;
     return;
   }
@@ -110,8 +145,8 @@ function renderAll() {
   if (visible.length === 0) {
     el.innerHTML = `
       <div class="sb-empty">
-        <div class="sb-empty-icon">💬</div>
-        <div>向 <strong>${STATE.selectedAgent}</strong> 发消息，开始对话</div>
+        <div class="sb-empty-icon">${EMPTY_ICON_SVG}</div>
+        <div>${sbt('emptyChat').replace('{agent}', `<strong>${STATE.selectedAgent}</strong>`)}</div>
       </div>`;
     return;
   }
@@ -237,7 +272,12 @@ async function sendMessage() {
   }
 }
 
-// ── Status ─────────────────────────────────────────────────────────────────
+// ── Status & session display ────────────────────────────────────────────────
+
+function updateSessionDisplay() {
+  const el = document.getElementById('sessionKeyDisplay');
+  if (el) el.textContent = STATE.channelName ? sessionKey() : '—';
+}
 
 function updateStatus() {
   const dot       = document.getElementById('statusDot');
@@ -248,24 +288,24 @@ function updateStatus() {
 
   if (STATE.wsConnected) {
     dot.className     = 'sb-status-dot connected';
-    text.textContent  = '已连接';
+    text.textContent  = sbt('connected');
     btn.disabled      = false;
     input.disabled    = false;
-    input.placeholder = '发送消息… (Enter 发送，Shift+Enter 换行)';
+    input.placeholder = sbt('placeholderOn');
     inputArea?.classList.remove('sb-disconnected');
   } else if (STATE.reconnecting) {
     dot.className     = 'sb-status-dot connecting';
-    text.textContent  = '重连中…';
+    text.textContent  = sbt('reconnecting');
     btn.disabled      = true;
     input.disabled    = true;
-    input.placeholder = '重连中，请稍候…';
+    input.placeholder = sbt('placeholderReconnecting');
     inputArea?.classList.add('sb-disconnected');
   } else {
     dot.className     = 'sb-status-dot';
-    text.textContent  = '未连接';
+    text.textContent  = sbt('disconnected');
     btn.disabled      = true;
     input.disabled    = true;
-    input.placeholder = '请先在插件中连接 OpenClaw';
+    input.placeholder = sbt('placeholderOff');
     inputArea?.classList.add('sb-disconnected');
   }
 }
@@ -298,6 +338,7 @@ function switchAgent(newAgent) {
   STATE.messages      = [];
   STATE.lastMsgId     = null;
   stopPolling();
+  updateSessionDisplay();
   renderAll();
   if (STATE.wsConnected) {
     fetchHistory();
@@ -308,17 +349,24 @@ function switchAgent(newAgent) {
 // ── Init ───────────────────────────────────────────────────────────────────
 
 async function init() {
+  // Load language setting from storage (shared with popup)
+  try {
+    const stored = await chrome.storage.local.get('lang');
+    if (stored.lang) sbLang = stored.lang;
+  } catch (_) {}
+
   await loadAgents();
 
   try {
     const s = await bg({ type: 'get_status' });
     if (s) {
-      STATE.wsConnected = s.wsConnected || false;
+      STATE.wsConnected  = s.wsConnected  || false;
       STATE.reconnecting = s.reconnecting || false;
-      STATE.channelName = s.browserId || '';
+      STATE.channelName  = s.browserId    || '';
     }
   } catch (_) {}
 
+  updateSessionDisplay();
   updateStatus();
   renderAll();
 
@@ -355,6 +403,7 @@ chrome.runtime.onMessage.addListener(msg => {
   STATE.wsConnected   = msg.wsConnected  || false;
   STATE.reconnecting  = msg.reconnecting || false;
   STATE.channelName   = msg.browserId    || STATE.channelName;
+  updateSessionDisplay();
   updateStatus();
 
   if (!wasConnected && STATE.wsConnected) {
@@ -379,5 +428,14 @@ chrome.runtime.sendMessage({ type: 'sidebar_opened' }).catch(()=>{});
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
     chrome.runtime.sendMessage({ type: 'sidebar_closed' }).catch(()=>{});
+  }
+});
+
+// Sync language if user changes it in the popup while sidebar is open
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.lang) {
+    sbLang = changes.lang.newValue || 'zh';
+    updateStatus();
+    renderAll();
   }
 });

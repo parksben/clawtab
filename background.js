@@ -988,9 +988,10 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
       case 'sidebar_ensure_and_send':
         (async()=>{
           try {
-            // Ensure session exists (idempotent)
+            // Try to create session; ignore errors — agent sessions are created
+            // by the agent itself, this is best-effort only
             await wsRequest('sessions.create',{channel:'webchat',sessionKey:msg.sessionKey},8000)
-              .catch(e=>{ if(!e.code==='SESSION_EXISTS'&&!e.message?.includes('exists')) throw e; });
+              .catch(()=>{});
             await wsRequest('chat.send',{sessionKey:msg.sessionKey,message:msg.message,deliver:true},10000);
             sendResponse({ok:true});
           } catch(e) { sendResponse({ok:false, error:e.message}); }
