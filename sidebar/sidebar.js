@@ -168,12 +168,15 @@ function exitPickModeUI() {
   document.getElementById('pickBtn')?.classList.remove('active');
 }
 
-function formatAttachLabel(a) {
-  let label = a.tag;
-  if (a.id) label += '#' + a.id.slice(0, 16);
-  else if (a.classes.length) label += '.' + a.classes[0].slice(0, 16);
-  if (a.text) label += ' "' + a.text.slice(0, 22) + '"';
-  return label;
+function formatAttachLabel(a, i) {
+  return `#${i + 1}:${a.tag}`;
+}
+
+function attachTooltip(a) {
+  const idPart  = a.id ? `#${a.id}` : '';
+  const clsPart = !a.id && a.classes.length ? `.${a.classes.join('.')}` : '';
+  const txtPart = a.text ? `\n"${a.text.slice(0, 60)}"` : '';
+  return `${a.tag}${idPart}${clsPart}${txtPart}\n${a.selector}`;
 }
 
 function renderAttachments() {
@@ -184,8 +187,8 @@ function renderAttachments() {
     const a = STATE.attachments[i];
     const tag = document.createElement('span');
     tag.className = 'sb-attach-tag';
-    tag.title = a.selector;
-    tag.innerHTML = `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a))}</span>` +
+    tag.title = attachTooltip(a);
+    tag.innerHTML = `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>` +
       `<button class="sb-attach-tag-del" data-idx="${i}" title="移除">×</button>`;
     el.appendChild(tag);
   }
@@ -194,8 +197,67 @@ function renderAttachments() {
       const idx = parseInt(btn.dataset.idx, 10);
       STATE.attachments.splice(idx, 1);
       renderAttachments();
+      showPickAutocomplete(); // refresh dropdown if open
     });
   });
+}
+
+// ── Autocomplete for #n:tag references ────────────────────────────────────
+
+let _acActiveIdx = -1;
+
+function getAutocompleteContext(input) {
+  const before = input.value.slice(0, input.selectionStart);
+  const m = before.match(/#([\w:]*)$/);
+  if (!m) return null;
+  return { hashStart: input.selectionStart - m[0].length, typed: m[1] };
+}
+
+function showPickAutocomplete() {
+  const input    = document.getElementById('msgInput');
+  const dropdown = document.getElementById('pickAutocomplete');
+  if (!dropdown || !STATE.attachments.length) { hidePickAutocomplete(); return; }
+
+  const ctx = getAutocompleteContext(input);
+  if (!ctx) { hidePickAutocomplete(); return; }
+
+  const options = STATE.attachments
+    .map((a, i) => formatAttachLabel(a, i))          // '#1:div', '#2:span' …
+    .filter(label => label.startsWith('#' + ctx.typed));
+
+  if (!options.length) { hidePickAutocomplete(); return; }
+
+  _acActiveIdx = -1;
+  dropdown.innerHTML = '';
+  for (const label of options) {
+    const item = document.createElement('div');
+    item.className = 'sb-autocomplete-item';
+    item.textContent = label;
+    item.dataset.value = label;
+    item.addEventListener('mousedown', e => {
+      e.preventDefault(); // keep focus in textarea
+      selectAutocomplete(label);
+    });
+    dropdown.appendChild(item);
+  }
+  dropdown.style.display = 'block';
+}
+
+function hidePickAutocomplete() {
+  const dropdown = document.getElementById('pickAutocomplete');
+  if (dropdown) { dropdown.style.display = 'none'; _acActiveIdx = -1; }
+}
+
+function selectAutocomplete(label) {
+  const input = document.getElementById('msgInput');
+  const ctx   = getAutocompleteContext(input);
+  if (!ctx) return;
+  const val    = input.value;
+  const newVal = val.slice(0, ctx.hashStart) + label + val.slice(input.selectionStart);
+  input.value  = newVal;
+  const newPos = ctx.hashStart + label.length;
+  input.setSelectionRange(newPos, newPos);
+  hidePickAutocomplete();
 }
 
 // ── Tab state save/restore ─────────────────────────────────────────────────
@@ -361,16 +423,17 @@ async function sendMessage() {
   input.value  = '';
   input.style.height = '';
 
-  // Build message text, appending any picked element context
+  // Build message text, appending element reference context
   let fullText = text;
   if (STATE.attachments.length > 0) {
     const lines = STATE.attachments.map((a, i) => {
+      const ref     = formatAttachLabel(a, i);           // '#1:div'
       const idPart  = a.id ? `#${a.id}` : '';
       const clsPart = !a.id && a.classes.length ? `.${a.classes[0]}` : '';
-      const txtPart = a.text ? ` "${a.text.slice(0, 40)}"` : '';
-      return `${i + 1}. ${a.tag}${idPart}${clsPart}${txtPart} → \`${a.selector}\``;
+      const txtPart = a.text ? ` "${a.text.slice(0, 50)}"` : '';
+      return `${ref}  ${a.tag}${idPart}${clsPart}${txtPart}  \`${a.selector}\``;
     });
-    fullText += '\n\n---\n附件页面元素：\n' + lines.join('\n');
+    fullText += '\n\n---\n页面元素引用：\n' + lines.join('\n');
   }
 
   // Clear attachments immediately on send
@@ -532,6 +595,43 @@ document.getElementById('pickBtn').addEventListener('click', () => {
 });
 
 document.getElementById('msgInput').addEventListener('keydown', e => {
+  const dropdown = document.getElementById('pickAutocomplete');
+  const open = dropdown && dropdown.style.display !== 'none';
+
+  if (open) {
+    const items = [...dropdown.querySelectorAll('.sb-autocomplete-item')];
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      _acActiveIdx = Math.min(_acActiveIdx + 1, items.length - 1);
+      items.forEach((el, i) => el.classList.toggle('active', i === _acActiveIdx));
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      _acActiveIdx = Math.max(_acActiveIdx - 1, 0);
+      items.forEach((el, i) => el.classList.toggle('active', i === _acActiveIdx));
+      return;
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && !e.metaKey && !e.ctrlKey)) {
+      if (_acActiveIdx >= 0 && items[_acActiveIdx]) {
+        e.preventDefault();
+        selectAutocomplete(items[_acActiveIdx].dataset.value);
+        return;
+      }
+      // Tab with no selection: pick first option
+      if (e.key === 'Tab' && items.length) {
+        e.preventDefault();
+        selectAutocomplete(items[0].dataset.value);
+        return;
+      }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      hidePickAutocomplete();
+      return;
+    }
+  }
+
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !STATE.waiting) {
     e.preventDefault();
     sendMessage();
@@ -541,6 +641,14 @@ document.getElementById('msgInput').addEventListener('keydown', e => {
 document.getElementById('msgInput').addEventListener('input', e => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+  // Trigger autocomplete whenever there are attachments
+  if (STATE.attachments.length > 0) showPickAutocomplete();
+  else hidePickAutocomplete();
+});
+
+document.getElementById('msgInput').addEventListener('blur', () => {
+  // Delay so mousedown on a dropdown item fires before blur hides it
+  setTimeout(hidePickAutocomplete, 150);
 });
 
 document.getElementById('agentSelect').addEventListener('change', e => {

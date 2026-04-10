@@ -252,6 +252,36 @@ body {
 .sb-send-btn:hover:not(:disabled) { background: #4f46e5; transform: scale(1.05); }
 .sb-send-btn:disabled { background: #c7d2fe; cursor: not-allowed; }
 
+/* ─── Input wrap (positions autocomplete dropdown) ─── */
+.sb-input-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+/* ─── Autocomplete dropdown ─── */
+.sb-autocomplete {
+  position: absolute;
+  bottom: 100%;
+  left: 0; right: 0;
+  background: #fff;
+  border: 1.5px solid #c4b5fd;
+  border-radius: 8px;
+  box-shadow: 0 -4px 16px rgba(99,102,241,.12);
+  overflow: hidden;
+  z-index: 20;
+  display: none;
+}
+.sb-autocomplete-item {
+  padding: 7px 12px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  color: #4f46e5;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sb-autocomplete-item:hover,
+.sb-autocomplete-item.active { background: #ede9fe; }
+
 /* ─── Disconnected input state ─── */
 .sb-input-area.sb-disconnected {
   background: #f8fafc;
