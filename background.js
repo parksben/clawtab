@@ -369,7 +369,7 @@ function wsScheduleReconnect() {
 // ═══════════════════════════════════════════════════════
 
 async function ensureSession() {
-  try { await wsRequest('sessions.create',{channel:'clawtab',sessionKey:S.sessionKey},8000); S.sessionExists=true; }
+  try { await wsRequest('sessions.create',{channel:'webchat',sessionKey:S.sessionKey},8000); S.sessionExists=true; }
   catch(e) { if(e.code==='SESSION_EXISTS'||e.message?.includes('exists')) S.sessionExists=true; }
 }
 
