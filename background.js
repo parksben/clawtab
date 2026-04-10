@@ -1021,6 +1021,31 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
           .catch(()=>{});
         broadcastStatus(); sendResponse({ok:true}); break;
 
+      // ── Element picker handlers ──
+      case 'enter_pick_mode':
+        (async()=>{
+          const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+          if(tab?.id) chrome.tabs.sendMessage(tab.id,{type:'enter_pick_mode'}).catch(()=>{});
+          sendResponse({ok:true});
+        })(); return true;
+
+      case 'exit_pick_mode':
+        (async()=>{
+          const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+          if(tab?.id) chrome.tabs.sendMessage(tab.id,{type:'exit_pick_mode'}).catch(()=>{});
+          sendResponse({ok:true});
+        })(); return true;
+
+      case 'element_picked':
+        // Relay from content script → sidebar
+        chrome.runtime.sendMessage({type:'element_picked',element:msg.element}).catch(()=>{});
+        sendResponse({ok:true}); break;
+
+      case 'pick_mode_exited':
+        // Relay Escape exit from content script → sidebar
+        chrome.runtime.sendMessage({type:'pick_mode_exited'}).catch(()=>{});
+        sendResponse({ok:true}); break;
+
       default: sendResponse({ok:false,error:'unknown'});
     }
   })();
@@ -1034,7 +1059,18 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
 chrome.tabs.onCreated.addListener(reportTabs);
 chrome.tabs.onRemoved.addListener(reportTabs);
 chrome.tabs.onUpdated.addListener((_,info)=>{ if(info.status==='complete') reportTabs(); });
-chrome.tabs.onActivated.addListener(()=>{ if(S.wsConnected&&S.loop.status==='idle') captureQuickSnapshot(); });
+chrome.tabs.onActivated.addListener(({tabId})=>{
+  // Notify sidebar of new active tab (for input/attachment save-restore)
+  chrome.runtime.sendMessage({type:'tab_activated',tabId}).catch(()=>{});
+  // Exit any active pick mode in all tabs when switching
+  chrome.tabs.query({},tabs=>{
+    for(const tab of tabs){
+      if(tab.id&&tab.url&&!tab.url.startsWith('chrome'))
+        chrome.tabs.sendMessage(tab.id,{type:'exit_pick_mode'}).catch(()=>{});
+    }
+  });
+  if(S.wsConnected&&S.loop.status==='idle') captureQuickSnapshot();
+});
 
 chrome.alarms.create('keepalive',{periodInMinutes:0.4});
 chrome.alarms.onAlarm.addListener(alarm=>{

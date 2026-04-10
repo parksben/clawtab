@@ -39,6 +39,14 @@
       case 'eval':
         return await Promise.race([evalCode(msg.code), timeout(10000)]);
 
+      case 'enter_pick_mode':
+        enterPickMode();
+        return { status: 'entered' };
+
+      case 'exit_pick_mode':
+        exitPickMode();
+        return { status: 'exited' };
+
       default:
         throw new Error(`Unknown message type: ${msg.type}`);
     }
@@ -100,6 +108,102 @@
       return result;
     } catch (e) {
       throw new Error(`Eval error: ${e.message}`);
+    }
+  }
+
+  // ── Element picker mode ────────────────────────────────────────────────────
+
+  let _pickMode = false;
+  let _pickHighlight = null;
+  const _pickHandlers = {};
+
+  function enterPickMode() {
+    if (_pickMode) return;
+    _pickMode = true;
+
+    // Highlight overlay (pointer-events: none so it doesn't interfere with hover targets)
+    _pickHighlight = document.createElement('div');
+    _pickHighlight.id = '__clawtab_pick_hl__';
+    _pickHighlight.style.cssText = [
+      'position:fixed', 'pointer-events:none', 'z-index:2147483647',
+      'border:2px solid #6366f1', 'background:rgba(99,102,241,0.12)',
+      'border-radius:3px', 'box-shadow:0 0 0 1px rgba(99,102,241,0.3)',
+      'transition:top .08s,left .08s,width .08s,height .08s', 'display:none',
+    ].join(';');
+    document.documentElement.appendChild(_pickHighlight);
+
+    _pickHandlers.mousemove = (e) => {
+      const el = e.target;
+      if (!el || el === _pickHighlight) return;
+      const rect = el.getBoundingClientRect();
+      const hl = _pickHighlight;
+      hl.style.display = 'block';
+      hl.style.left   = rect.left + 'px';
+      hl.style.top    = rect.top  + 'px';
+      hl.style.width  = rect.width  + 'px';
+      hl.style.height = rect.height + 'px';
+    };
+
+    _pickHandlers.click = (e) => {
+      const el = e.target;
+      if (!el || el === _pickHighlight) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const info = captureElement(el);
+      exitPickMode();
+      chrome.runtime.sendMessage({ type: 'element_picked', element: info }).catch(() => {});
+    };
+
+    _pickHandlers.keydown = (e) => {
+      if (e.key === 'Escape') {
+        exitPickMode();
+        chrome.runtime.sendMessage({ type: 'pick_mode_exited' }).catch(() => {});
+      }
+    };
+
+    document.addEventListener('mousemove', _pickHandlers.mousemove, true);
+    document.addEventListener('click',     _pickHandlers.click,     true);
+    document.addEventListener('keydown',   _pickHandlers.keydown,   true);
+    document.documentElement.style.cursor = 'crosshair';
+  }
+
+  function exitPickMode() {
+    if (!_pickMode) return;
+    _pickMode = false;
+    if (_pickHighlight) { _pickHighlight.remove(); _pickHighlight = null; }
+    document.removeEventListener('mousemove', _pickHandlers.mousemove, true);
+    document.removeEventListener('click',     _pickHandlers.click,     true);
+    document.removeEventListener('keydown',   _pickHandlers.keydown,   true);
+    document.documentElement.style.cursor = '';
+  }
+
+  function captureElement(el) {
+    const tag     = el.tagName.toLowerCase();
+    const id      = el.id || '';
+    const classes = Array.from(el.classList).slice(0, 4);
+    const text    = (el.textContent || el.value || el.placeholder || el.alt || '').trim().slice(0, 80);
+    const selector = computePickSelector(el);
+    return { tag, id, classes, text, selector };
+  }
+
+  function computePickSelector(el) {
+    try {
+      if (el.id) return '#' + CSS.escape(el.id);
+      const parts = [];
+      let cur = el;
+      for (let i = 0; i < 5 && cur && cur !== document.documentElement; i++) {
+        if (cur.id) { parts.unshift('#' + CSS.escape(cur.id)); break; }
+        let part = cur.tagName.toLowerCase();
+        if (cur.parentElement) {
+          const siblings = Array.from(cur.parentElement.children).filter(c => c.tagName === cur.tagName);
+          if (siblings.length > 1) part += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+        }
+        parts.unshift(part);
+        cur = cur.parentElement;
+      }
+      return parts.join(' > ') || el.tagName.toLowerCase();
+    } catch (_) {
+      return el.tagName.toLowerCase();
     }
   }
 })();

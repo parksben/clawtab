@@ -44,6 +44,10 @@ const STATE = {
   sending:       false,
   waiting:       false,   // true while waiting for agent reply
   waitingTimer:  null,    // safety-timeout handle
+  pickMode:      false,
+  attachments:   [],      // [{ tag, id, classes, text, selector }]
+  activeTabId:   null,
+  tabStates:     {},      // { [tabId]: { input, attachments } }
 };
 
 // Default agent list (overridden if agents.list API works)
@@ -142,6 +146,77 @@ function hideThinking() {
 function updateSendBtn() {
   const btn = document.getElementById('sendBtn');
   if (btn) btn.disabled = !STATE.wsConnected || STATE.waiting;
+}
+
+// ── Element picker ─────────────────────────────────────────────────────────
+
+function togglePickMode() {
+  if (STATE.pickMode) {
+    STATE.pickMode = false;
+    document.getElementById('pickBtn')?.classList.remove('active');
+    bg({ type: 'exit_pick_mode' }).catch(() => {});
+  } else {
+    STATE.pickMode = true;
+    document.getElementById('pickBtn')?.classList.add('active');
+    bg({ type: 'enter_pick_mode' }).catch(() => {});
+  }
+}
+
+function exitPickModeUI() {
+  if (!STATE.pickMode) return;
+  STATE.pickMode = false;
+  document.getElementById('pickBtn')?.classList.remove('active');
+}
+
+function formatAttachLabel(a) {
+  let label = a.tag;
+  if (a.id) label += '#' + a.id.slice(0, 16);
+  else if (a.classes.length) label += '.' + a.classes[0].slice(0, 16);
+  if (a.text) label += ' "' + a.text.slice(0, 22) + '"';
+  return label;
+}
+
+function renderAttachments() {
+  const el = document.getElementById('attachments');
+  if (!el) return;
+  el.innerHTML = '';
+  for (let i = 0; i < STATE.attachments.length; i++) {
+    const a = STATE.attachments[i];
+    const tag = document.createElement('span');
+    tag.className = 'sb-attach-tag';
+    tag.title = a.selector;
+    tag.innerHTML = `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a))}</span>` +
+      `<button class="sb-attach-tag-del" data-idx="${i}" title="移除">×</button>`;
+    el.appendChild(tag);
+  }
+  el.querySelectorAll('.sb-attach-tag-del').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.idx, 10);
+      STATE.attachments.splice(idx, 1);
+      renderAttachments();
+    });
+  });
+}
+
+// ── Tab state save/restore ─────────────────────────────────────────────────
+
+function saveTabState(tabId) {
+  if (tabId == null) return;
+  const input = document.getElementById('msgInput')?.value || '';
+  STATE.tabStates[tabId] = { input, attachments: [...STATE.attachments] };
+}
+
+function restoreTabState(tabId) {
+  const saved = STATE.tabStates[tabId];
+  const input = document.getElementById('msgInput');
+  if (saved) {
+    if (input) { input.value = saved.input; input.style.height = ''; }
+    STATE.attachments = [...saved.attachments];
+  } else {
+    if (input) { input.value = ''; input.style.height = ''; }
+    STATE.attachments = [];
+  }
+  renderAttachments();
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────
@@ -286,7 +361,23 @@ async function sendMessage() {
   input.value  = '';
   input.style.height = '';
 
-  // Optimistic local echo
+  // Build message text, appending any picked element context
+  let fullText = text;
+  if (STATE.attachments.length > 0) {
+    const lines = STATE.attachments.map((a, i) => {
+      const idPart  = a.id ? `#${a.id}` : '';
+      const clsPart = !a.id && a.classes.length ? `.${a.classes[0]}` : '';
+      const txtPart = a.text ? ` "${a.text.slice(0, 40)}"` : '';
+      return `${i + 1}. ${a.tag}${idPart}${clsPart}${txtPart} → \`${a.selector}\``;
+    });
+    fullText += '\n\n---\n附件页面元素：\n' + lines.join('\n');
+  }
+
+  // Clear attachments immediately on send
+  STATE.attachments = [];
+  renderAttachments();
+
+  // Optimistic local echo (show original text only, not the appended context)
   const localMsg = { id: `local-${Date.now()}`, role: 'user', content: text };
   STATE.messages.push(localMsg);
   appendMsgNode(localMsg);
@@ -295,7 +386,7 @@ async function sendMessage() {
     await bg({
       type:       'sidebar_ensure_and_send',
       sessionKey: sessionKey(),
-      message:    text,
+      message:    fullText,
     });
     // Show thinking indicator and lock send until agent replies
     STATE.waiting = true;
@@ -328,6 +419,7 @@ function updateStatus() {
   const text      = document.getElementById('statusText');
   const input     = document.getElementById('msgInput');
   const inputArea = document.querySelector('.sb-input-area');
+  const pickBtn   = document.getElementById('pickBtn');
 
   if (STATE.wsConnected) {
     dot.className     = 'sb-status-dot connected';
@@ -335,18 +427,21 @@ function updateStatus() {
     input.disabled    = false;
     input.placeholder = sbt('placeholderOn');
     inputArea?.classList.remove('sb-disconnected');
+    if (pickBtn) pickBtn.disabled = false;
   } else if (STATE.reconnecting) {
     dot.className     = 'sb-status-dot connecting';
     text.textContent  = sbt('reconnecting');
     input.disabled    = true;
     input.placeholder = sbt('placeholderReconnecting');
     inputArea?.classList.add('sb-disconnected');
+    if (pickBtn) pickBtn.disabled = true;
   } else {
     dot.className     = 'sb-status-dot';
     text.textContent  = sbt('disconnected');
     input.disabled    = true;
     input.placeholder = sbt('placeholderOff');
     inputArea?.classList.add('sb-disconnected');
+    if (pickBtn) pickBtn.disabled = true;
   }
   updateSendBtn();
 }
@@ -411,6 +506,12 @@ async function init() {
     }
   } catch (_) {}
 
+  // Track which tab is currently active for input/attachment state persistence
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) STATE.activeTabId = tab.id;
+  } catch (_) {}
+
   updateSessionDisplay();
   updateStatus();
   renderAll();
@@ -424,6 +525,11 @@ async function init() {
 // ── Event listeners ────────────────────────────────────────────────────────
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
+
+document.getElementById('pickBtn').addEventListener('click', () => {
+  if (!STATE.wsConnected) return;
+  togglePickMode();
+});
 
 document.getElementById('msgInput').addEventListener('keydown', e => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !STATE.waiting) {
@@ -443,23 +549,58 @@ document.getElementById('agentSelect').addEventListener('change', e => {
 
 // Listen to background status broadcasts
 chrome.runtime.onMessage.addListener(msg => {
-  if (msg.type !== 'status_update') return;
-  const wasConnected  = STATE.wsConnected;
-  STATE.wsConnected   = msg.wsConnected  || false;
-  STATE.reconnecting  = msg.reconnecting || false;
-  STATE.channelName   = msg.browserId    || STATE.channelName;
-  updateSessionDisplay();
-  updateStatus();
+  if (msg.type === 'status_update') {
+    const wasConnected  = STATE.wsConnected;
+    STATE.wsConnected   = msg.wsConnected  || false;
+    STATE.reconnecting  = msg.reconnecting || false;
+    STATE.channelName   = msg.browserId    || STATE.channelName;
+    updateSessionDisplay();
+    updateStatus();
 
-  if (!wasConnected && STATE.wsConnected) {
-    STATE.messages  = [];
-    STATE.lastMsgId = null;
-    renderAll();
-    fetchHistory();
-    startPolling();
-  } else if (wasConnected && !STATE.wsConnected) {
-    stopPolling();
-    renderAll();
+    if (!wasConnected && STATE.wsConnected) {
+      STATE.messages  = [];
+      STATE.lastMsgId = null;
+      renderAll();
+      fetchHistory();
+      startPolling();
+    } else if (wasConnected && !STATE.wsConnected) {
+      exitPickModeUI();
+      stopPolling();
+      renderAll();
+    }
+    return;
+  }
+
+  if (msg.type === 'element_picked') {
+    // Auto-exit pick mode after one element is picked
+    exitPickModeUI();
+    STATE.attachments.push(msg.element);
+    renderAttachments();
+    return;
+  }
+
+  if (msg.type === 'pick_mode_exited') {
+    // Escape pressed in page
+    exitPickModeUI();
+    return;
+  }
+
+  if (msg.type === 'tab_activated') {
+    const prevTabId = STATE.activeTabId;
+    const newTabId  = msg.tabId;
+    if (prevTabId === newTabId) return;
+
+    // Save input + attachments for the tab we're leaving
+    saveTabState(prevTabId);
+
+    // Exit pick mode (background already sent exit_pick_mode to all tabs)
+    exitPickModeUI();
+
+    STATE.activeTabId = newTabId;
+
+    // Restore or clear for the new tab
+    restoreTabState(newTabId);
+    return;
   }
 });
 
