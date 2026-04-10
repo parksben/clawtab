@@ -42,6 +42,19 @@
       "js": ["content/content.js"],
       "run_at": "document_idle",
       "all_frames": false
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content/floatball.js"],
+      "css": ["content/floatball.css"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

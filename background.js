@@ -294,11 +294,6 @@ async function wsConnect(url,token,browserId) {
         await ensureSession(); await syncLastSeenId();
         startPolling(); reportTabs();
         sendHandshake();
-        // Open side panel in the active window (best-effort, requires user gesture in some Chrome versions)
-        try {
-          const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-          if (tab?.windowId) await chrome.sidePanel.open({ windowId: tab.windowId });
-        } catch(_) {}
         // 不在连接时自动截图，截图只在任务执行中更新
       } else {
         const code=msg.payload?.code||'';
