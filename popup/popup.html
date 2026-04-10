@@ -47,7 +47,10 @@
 
     <!-- ── Config panel (disconnected) ── -->
     <div class="section" id="configSection">
-      <div id="retryTip" class="retry-tip" style="display:none;">⚠️ <span data-i18n="connFailed"></span></div>
+      <div id="retryTip" class="retry-tip" style="display:none;">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+        <span data-i18n="connFailed"></span>
+      </div>
       <div class="section-title" data-i18n="config"></div>
       <div class="form-group">
         <label>Gateway URL</label>
@@ -76,12 +79,16 @@
 
     <!-- ── Pairing panel (waiting for approval) ── -->
     <div class="section pairing-section" id="pairingSection" style="display:none;">
-      <div class="pairing-icon">🔗</div>
+      <div class="pairing-icon">
+        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </div>
       <div class="pairing-title-big" data-i18n="pairingTitle"></div>
       <div class="pairing-desc" data-i18n="pairingDesc"></div>
       <div class="pairing-code-wrap">
         <span class="pairing-code-text" id="pairingCodeText"></span>
-        <button class="copy-btn" id="pairingCopyBtn">⎘</button>
+        <button class="copy-btn" id="pairingCopyBtn">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+        </button>
       </div>
       <div class="pairing-or" data-i18n="pairingOr"></div>
       <code class="pairing-cmd" id="pairingCmd"></code>

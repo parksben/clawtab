@@ -38,7 +38,7 @@ const I18N = {
     loopFailed:     'Task failed',
     loopCancelled:  'Cancelled',
     // Pairing panel
-    pairingTitle: '🔗 Pairing required',
+    pairingTitle: 'Pairing required',
     pairingDesc:  'Send this pairing code to your OpenClaw agent:',
     pairingOr:    'Or run on your Gateway:',
     // Stats
@@ -77,7 +77,7 @@ const I18N = {
     loopDone:       '任务完成',
     loopFailed:     '任务失败',
     loopCancelled:  '已取消',
-    pairingTitle: '🔗 需要配对',
+    pairingTitle: '需要配对',
     pairingDesc:  '将配对码发送给 OpenClaw Agent：',
     pairingOr:    '或在 Gateway 上运行：',
     browserIdLabel: '标识',
@@ -186,8 +186,10 @@ function render(data) {
     show('chatBtnWrap');
     const chatBtn = document.getElementById('chatBtn');
     if (chatBtn) {
-      chatBtn.textContent = sidebarOpen ? t('hideChat') : t('openChat');
-      chatBtn.className = 'btn btn-chat' + (sidebarOpen ? ' chat-open' : '');
+    chatBtn.innerHTML = sidebarOpen
+      ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></svg>${t('hideChat')}`
+      : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>${t('openChat')}`;
+    chatBtn.className = 'btn btn-chat' + (sidebarOpen ? ' chat-open' : '');
     }
     // Loop section only when task is running
     const hasTask = loopStatus !== 'idle';
