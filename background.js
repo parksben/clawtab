@@ -1005,11 +1005,10 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
             return;
           }
           try {
-            // Session is created by the agent — do not attempt sessions.create here,
-            // it always fails with a permissions error for agent-owned sessions.
-            // deliver:false mirrors sendResult(); the agent subscription picks up
-            // new messages without needing a push-deliver.
-            await wsRequest('chat.send',{sessionKey:msg.sessionKey,message:msg.message,deliver:false},10000);
+            // deliver:true is required so the agent receives a push notification
+            // and picks up the user's message immediately.  deliver:false is used
+            // only for sendResult (browser-side ACK) which the agent polls for.
+            await wsRequest('chat.send',{sessionKey:msg.sessionKey,message:msg.message,deliver:true},10000);
             sendResponse({ok:true});
           } catch(e) {
             console.error('[ClawTab] sidebar_ensure_and_send failed:', e.message, '| code:', e.code);
@@ -1077,13 +1076,12 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         })(); return true;
 
       case 'element_picked':
-        // Relay from content script → sidebar
-        chrome.runtime.sendMessage({type:'element_picked',element:msg.element}).catch(()=>{});
+        // content.js already broadcasts via chrome.runtime.sendMessage which
+        // reaches ALL extension pages (sidebar) directly — no relay needed.
         sendResponse({ok:true}); break;
 
       case 'pick_mode_exited':
-        // Relay Escape exit from content script → sidebar
-        chrome.runtime.sendMessage({type:'pick_mode_exited'}).catch(()=>{});
+        // Same: content.js broadcast already reaches the sidebar directly.
         sendResponse({ok:true}); break;
 
       default: sendResponse({ok:false,error:'unknown'});
