@@ -79,31 +79,60 @@ function extractJsonBlock(text) {
   try { return JSON.parse(m[1]); } catch { return null; }
 }
 
-/** Summarise a clawtab_cmd action name for display */
+/** Extract tool_use content blocks from a message */
+function extractToolCalls(msg) {
+  const blocks = Array.isArray(msg.content) ? msg.content
+               : Array.isArray(msg.blocks)  ? msg.blocks : [];
+  return blocks.filter(b => b.type === 'tool_use');
+}
+
+/** Summarise a clawtab_cmd action for display — returns HTML string */
 function summariseCmd(cmd) {
-  const actionMap = {
-    perceive:   '🔍 感知页面',
-    act:        '🖱️ 操作页面',
-    task_start: '▶️ 任务开始',
-    task_done:  '✅ 任务完成',
-    task_fail:  '❌ 任务失败',
-    cancel:     '🚫 已取消',
+  const iconMap = {
+    perceive:   'eye',
+    act:        'mouse-pointer',
+    task_start: 'settings',
+    task_done:  'settings',
+    task_fail:  'alert-triangle',
+    cancel:     'power-off',
+  };
+  const labelMap = {
+    perceive:   '感知页面',
+    act:        '操作页面',
+    task_start: '任务开始',
+    task_done:  '任务完成',
+    task_fail:  '任务失败',
+    cancel:     '已取消',
+  };
+  const opMap = {
+    navigate:   '导航',
+    click:      '点击',
+    fill:       '填写',
+    screenshot: '截图',
+    scroll:     '滚动',
+    eval:       '执行脚本',
+    get_text:   '读取文本',
+    new_tab:    '新标签页',
+    close_tab:  '关闭标签页',
   };
   const op = cmd.payload?.op;
-  const opMap = {
-    navigate: '🌐 导航',
-    click:    '🖱️ 点击',
-    fill:     '✏️ 填写',
-    screenshot: '📸 截图',
-    scroll:   '↕️ 滚动',
-    eval:     '⚡ 执行脚本',
-    get_text: '📋 读取文本',
-    new_tab:  '➕ 新标签页',
-    close_tab:'✖️ 关闭标签页',
-  };
-  const base = actionMap[cmd.action] || `⚙️ ${cmd.action}`;
-  const detail = op ? (opMap[op] || op) : '';
-  return detail ? `${base} · ${detail}` : base;
+  const ic    = iconMap[cmd.action]  || 'settings';
+  const base  = labelMap[cmd.action] || esc(cmd.action);
+  const detail = op ? (opMap[op] || esc(op)) : '';
+  return `${icon(ic, 13)} ${base}${detail ? ' · ' + detail : ''}`;
+}
+
+/** Summarise a tool_use content block — returns HTML string */
+function summariseToolCall(tc) {
+  const name = esc(tc.name || tc.id || 'tool');
+  const input = tc.input || {};
+  const skip = new Set(['code','content','text','html','script','query']);
+  const preview = Object.entries(input)
+    .filter(([k]) => !skip.has(k))
+    .slice(0, 2)
+    .map(([k, v]) => `${esc(k)}: ${esc(String(v).slice(0, 40))}`)
+    .join(' · ');
+  return `${icon('settings', 13)} ${name}${preview ? ' · ' + preview : ''}`;
 }
 
 /** Escape HTML */
@@ -182,17 +211,17 @@ function renderAttachments() {
     tag.className = 'sb-attach-tag';
     tag.title = attachTooltip(a);
     tag.innerHTML =
-      `<button class="sb-attach-tag-focus" title="在页面中高亮">${icon('locate', 10)}</button>` +
-      (a.screenshot ? `<img class="sb-attach-thumb" src="${a.screenshot}" alt="" />` : '') +
       `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>` +
       `<button class="sb-attach-tag-del" data-idx="${i}" title="移除">×</button>`;
-    tag.querySelector('.sb-attach-tag-focus').addEventListener('click', () => {
+    tag.addEventListener('click', (e) => {
+      if (e.target.closest('.sb-attach-tag-del')) return;
       bg({ type: 'flash_element', selector: a.selector }).catch(() => {});
     });
     el.appendChild(tag);
   }
   el.querySelectorAll('.sb-attach-tag-del').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
       const idx = parseInt(btn.dataset.idx, 10);
       STATE.attachments.splice(idx, 1);
       renderAttachments();
@@ -298,9 +327,9 @@ function renderAll() {
   const visible = STATE.messages.filter(m => {
     const text = msgText(m);
     const json = extractJsonBlock(text);
-    if (!json) return true;
-    if (json.type === 'clawtab_result') return false; // hide internal results
-    return true; // clawtab_cmd will be rendered as a tool-row, keep it
+    if (json?.type === 'clawtab_result') return false; // hide internal browser results
+    if (text.trim()) return true;
+    return extractToolCalls(m).length > 0; // tool_use-only messages are visible
   });
 
   if (visible.length === 0) {
@@ -325,20 +354,33 @@ function renderAll() {
 function buildMsgNode(msg) {
   const role = msg.role === 'user' ? 'user' : 'assistant';
   const text = msgText(msg);
-  if (!text.trim()) return null;
+  const toolCalls = extractToolCalls(msg);
 
+  // clawtab_cmd JSON block → single tool summary row
   const json = extractJsonBlock(text);
   if (json?.type === 'clawtab_cmd') {
-    // Show as tool summary row
     const row = document.createElement('div');
     row.className = 'sb-tool-row';
-    row.textContent = summariseCmd(json);
+    row.innerHTML = summariseCmd(json);
     return row;
   }
 
-  // Remove any leftover ```json``` blocks from the display text
+  // Tool-use-only message (no text, only tool_use blocks)
+  if (!text.trim() && toolCalls.length) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:contents';
+    for (const tc of toolCalls) {
+      const row = document.createElement('div');
+      row.className = 'sb-tool-row';
+      row.innerHTML = summariseToolCall(tc);
+      wrap.appendChild(row);
+    }
+    return wrap;
+  }
+
+  // Regular message — strip json fenced blocks then render
   const cleaned = text.replace(/```json[\s\S]*?```/g, '').trim();
-  if (!cleaned) return null;
+  if (!cleaned && !toolCalls.length) return null;
 
   const wrap = document.createElement('div');
   wrap.className = `sb-msg ${role}`;
@@ -346,10 +388,20 @@ function buildMsgNode(msg) {
   const body = document.createElement('div');
   body.className = 'sb-msg-body';
 
-  const bubble = document.createElement('div');
-  bubble.className = 'sb-bubble';
-  bubble.innerHTML = formatText(cleaned);
-  body.appendChild(bubble);
+  if (cleaned) {
+    const bubble = document.createElement('div');
+    bubble.className = 'sb-bubble';
+    bubble.innerHTML = formatText(cleaned);
+    body.appendChild(bubble);
+  }
+
+  // Any tool_use blocks from content array shown below the text bubble
+  for (const tc of toolCalls) {
+    const row = document.createElement('div');
+    row.className = 'sb-tool-row';
+    row.innerHTML = summariseToolCall(tc);
+    body.appendChild(row);
+  }
 
   // Inline attachment tags below user messages
   if (role === 'user' && msg.attachments?.length) {
@@ -359,11 +411,8 @@ function buildMsgNode(msg) {
       const tag = document.createElement('span');
       tag.className = 'sb-attach-tag sb-attach-tag--inline';
       tag.title = attachTooltip(a);
-      tag.innerHTML =
-        `<button class="sb-attach-tag-focus" title="高亮">${icon('locate', 10)}</button>` +
-        (a.screenshot ? `<img class="sb-attach-thumb" src="${a.screenshot}" alt="" />` : '') +
-        `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>`;
-      tag.querySelector('.sb-attach-tag-focus').addEventListener('click', () => {
+      tag.innerHTML = `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>`;
+      tag.addEventListener('click', () => {
         bg({ type: 'flash_element', selector: a.selector }).catch(() => {});
       });
       tagsDiv.appendChild(tag);
