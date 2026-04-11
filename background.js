@@ -1255,7 +1255,7 @@ chrome.tabs.onActivated.addListener(({tabId})=>{
 chrome.alarms.create('keepalive',{periodInMinutes:0.4});
 chrome.alarms.onAlarm.addListener(alarm=>{
   if(alarm.name!=='keepalive') return;
-  if(!S.wsConnected&&S.wsUrl&&S.wsToken&&!S.wsReconnectTimer) wsConnect(S.wsUrl,S.wsToken,S.browserId);
+  if(!S.wsConnected&&S.wsUrl&&S.wsToken&&!S.wsReconnectTimer&&!S.ws) wsConnect(S.wsUrl,S.wsToken,S.browserId);
   if(S.wsConnected&&!S.pollTimer&&!S.pollPaused) schedulePoll(0);
 });
 
