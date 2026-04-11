@@ -253,16 +253,23 @@ function resolvePending(id,msg) {
 async function wsConnect(url,token,browserId) {
   // 幂等保护：相同参数且正在连接中，直接返回，不打断
   if (S.ws && S.ws.readyState === WebSocket.CONNECTING &&
-      S.wsUrl === url && S.wsToken === token) return;
+      S.wsUrl === url && S.wsToken === token) {
+    console.log('[ClawTab] wsConnect: already connecting to same endpoint, skip');
+    return;
+  }
   wsDisconnect(); // 静默关闭旧连接，不触发 onclose 回调
   S.wsUrl=url; S.wsToken=token; S.browserId=browserId;
   S.sessionKey=`agent:main:clawtab-${browserId}`;
-  S.wsReconnectCount=0; S.wsGaveUp=false; S.wsReconnectDelay=1000; // 重置重试状态
+  // 注意：不在这里重置 wsReconnectCount / wsReconnectDelay
+  // 重置只在用户主动发起连接时（popup handler / init）执行，
+  // 这样 wsScheduleReconnect 的计数器才能真正累计并在 3 次后 giveUp。
   drawIcon('connecting'); broadcastStatus();
+  console.log('[ClawTab] wsConnect →', url, '| channel:', browserId, '| retry#', S.wsReconnectCount);
 
   try { S.ws=new WebSocket(url); } catch(e) { wsScheduleReconnect(); return; }
 
   S.ws.onopen = async () => {
+    console.log('[ClawTab] onopen — sending connect request');
     const cid='connect-'+Date.now();
     S.wsPendingConnectId=cid; S.wsPendingNonce=null;
     const stored=await chrome.storage.local.get(['deviceToken']);
@@ -284,10 +291,12 @@ async function wsConnect(url,token,browserId) {
     // challenge
     if (msg.type==='event'&&msg.event==='connect.challenge') {
       S.wsPendingNonce=msg.payload?.nonce||null;
+      console.log('[ClawTab] challenge received | deviceIdentity:', !!S.deviceIdentity, '| nonce:', !!S.wsPendingNonce);
       if (S.deviceIdentity&&S.wsPendingNonce&&S.wsPendingConnectId) {
         const role='operator',scopes=SCOPES,signedAtMs=Date.now();
         const device=await signConnect(S.deviceIdentity,{token:S.wsToken,role,scopes,signedAtMs,nonce:S.wsPendingNonce});
         const stored=await chrome.storage.local.get(['deviceToken']);
+        console.log('[ClawTab] sending signed connect | devId:', S.deviceIdentity.id?.slice(0,8));
         wsSend({type:'req',id:S.wsPendingConnectId,method:'connect',params:{
           minProtocol:3,maxProtocol:3,
           client:{id:'clawtab',version:'1.71.3',platform:'browser_extension',mode:'operator'},
@@ -296,6 +305,8 @@ async function wsConnect(url,token,browserId) {
           device,locale:'zh-CN',
           userAgent:`clawtab/${VERSION}${S.browserId?' ('+S.browserId+')':''}`,
         }});
+      } else {
+        console.warn('[ClawTab] challenge: cannot sign — missing deviceIdentity/nonce/connectId');
       }
       return;
     }
@@ -323,6 +334,7 @@ async function wsConnect(url,token,browserId) {
         // 不在连接时自动截图，截图只在任务执行中更新
       } else {
         const code=msg.payload?.code||'';
+        console.warn('[ClawTab] connect failed | code:', code, '| payload:', JSON.stringify(msg.payload));
         if (code==='NOT_PAIRED') {
           S.pairingPending=true;
           clearTimeout(S.wsReconnectTimer);
@@ -340,8 +352,9 @@ async function wsConnect(url,token,browserId) {
     if (msg.type==='res') { resolvePending(msg.id,msg); return; }
   };
 
-  S.ws.onerror=()=>{};
-  S.ws.onclose=()=>{
+  S.ws.onerror=(e)=>{ console.warn('[ClawTab] ws onerror', e?.message||''); };
+  S.ws.onclose=(ev)=>{
+    console.log('[ClawTab] onclose | code:', ev?.code, '| reason:', ev?.reason||'(none)');
     S.ws=null; S.wsConnected=false;
     if (S.loop.status==='acting'||S.loop.status==='perceiving') {
       setLoopStatus('failed','Connection lost during task',{errorMsg:'WebSocket disconnected'});
@@ -376,6 +389,7 @@ function wsDisconnect() {
 function wsScheduleReconnect() {
   if (!S.wsUrl||!S.wsToken) return;
   S.wsReconnectCount++;
+  console.warn('[ClawTab] wsScheduleReconnect | attempt #'+S.wsReconnectCount+' | delay:'+S.wsReconnectDelay+'ms');
   if (S.wsReconnectCount > 3) {
     // 连续失败3次，停止重连，回退到配置界面
     S.wsGaveUp = true;
@@ -980,6 +994,7 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
     switch(msg.type) {
       case 'connect':
         S.deviceIdentity=await loadOrCreateDevice();
+        S.wsReconnectCount=0; S.wsGaveUp=false; S.wsReconnectDelay=1000;
         await wsConnect(msg.url,msg.token,msg.name||'browser');
         sendResponse({ok:true}); break;
       case 'disconnect':
@@ -1266,7 +1281,10 @@ async function init() {
   drawIcon('idle');
   S.deviceIdentity=await loadOrCreateDevice();
   const data=await chrome.storage.local.get(['gatewayUrl','gatewayToken','browserName']);
-  if(data.gatewayUrl&&data.gatewayToken&&!S.ws&&!S.wsConnected) await wsConnect(data.gatewayUrl,data.gatewayToken,data.browserName||'browser');
+  if(data.gatewayUrl&&data.gatewayToken&&!S.ws&&!S.wsConnected) {
+    S.wsReconnectCount=0; S.wsGaveUp=false; S.wsReconnectDelay=1000;
+    await wsConnect(data.gatewayUrl,data.gatewayToken,data.browserName||'browser');
+  }
 }
 
 init();
