@@ -181,8 +181,13 @@ function renderAttachments() {
     const tag = document.createElement('span');
     tag.className = 'sb-attach-tag';
     tag.title = attachTooltip(a);
-    tag.innerHTML = `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>` +
+    tag.innerHTML =
+      `<button class="sb-attach-tag-focus" title="在页面中高亮">${icon('locate', 10)}</button>` +
+      `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>` +
       `<button class="sb-attach-tag-del" data-idx="${i}" title="移除">×</button>`;
+    tag.querySelector('.sb-attach-tag-focus').addEventListener('click', () => {
+      bg({ type: 'flash_element', selector: a.selector }).catch(() => {});
+    });
     el.appendChild(tag);
   }
   el.querySelectorAll('.sb-attach-tag-del').forEach(btn => {
@@ -190,7 +195,7 @@ function renderAttachments() {
       const idx = parseInt(btn.dataset.idx, 10);
       STATE.attachments.splice(idx, 1);
       renderAttachments();
-      showPickAutocomplete(); // refresh dropdown if open
+      showPickAutocomplete();
     });
   });
 }
@@ -336,10 +341,35 @@ function buildMsgNode(msg) {
 
   const wrap = document.createElement('div');
   wrap.className = `sb-msg ${role}`;
+
+  const body = document.createElement('div');
+  body.className = 'sb-msg-body';
+
   const bubble = document.createElement('div');
   bubble.className = 'sb-bubble';
   bubble.innerHTML = formatText(cleaned);
-  wrap.appendChild(bubble);
+  body.appendChild(bubble);
+
+  // Inline attachment tags below user messages
+  if (role === 'user' && msg.attachments?.length) {
+    const tagsDiv = document.createElement('div');
+    tagsDiv.className = 'sb-msg-attachments';
+    msg.attachments.forEach((a, i) => {
+      const tag = document.createElement('span');
+      tag.className = 'sb-attach-tag sb-attach-tag--inline';
+      tag.title = attachTooltip(a);
+      tag.innerHTML =
+        `<button class="sb-attach-tag-focus" title="高亮">${icon('locate', 10)}</button>` +
+        `<span class="sb-attach-tag-label">${esc(formatAttachLabel(a, i))}</span>`;
+      tag.querySelector('.sb-attach-tag-focus').addEventListener('click', () => {
+        bg({ type: 'flash_element', selector: a.selector }).catch(() => {});
+      });
+      tagsDiv.appendChild(tag);
+    });
+    body.appendChild(tagsDiv);
+  }
+
+  wrap.appendChild(body);
   return wrap;
 }
 
@@ -443,12 +473,13 @@ async function sendMessage() {
     fullText += '\n\n---\n页面元素引用：\n' + lines.join('\n');
   }
 
-  // Clear attachments immediately on send
+  // Clear attachments immediately on send (save copy for bubble)
+  const sentAttachments = [...STATE.attachments];
   STATE.attachments = [];
   renderAttachments();
 
   // Optimistic local echo (show original text only, not the appended context)
-  const localMsg = { id: `local-${Date.now()}`, role: 'user', content: text };
+  const localMsg = { id: `local-${Date.now()}`, role: 'user', content: text, attachments: sentAttachments };
   STATE.messages.push(localMsg);
   appendMsgNode(localMsg);
 

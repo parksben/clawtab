@@ -1076,6 +1076,41 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
           sendResponse({ok:true});
         })(); return true;
 
+      case 'flash_element':
+        (async()=>{
+          const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+          if (tab?.id) {
+            chrome.scripting.executeScript({
+              target: {tabId: tab.id},
+              world: 'MAIN',
+              func: (sel) => {
+                const el = document.querySelector(sel);
+                if (!el) return;
+                const styleId = '__ct_flash_style__';
+                if (!document.getElementById(styleId)) {
+                  const s = document.createElement('style');
+                  s.id = styleId;
+                  s.textContent =
+                    '@keyframes __ct_flash {' +
+                    '0%,100%{outline:3px solid rgba(99,102,241,0);box-shadow:0 0 0 0 rgba(99,102,241,0)}' +
+                    '25%{outline:3px solid #6366f1;box-shadow:0 0 0 8px rgba(99,102,241,0.25)}' +
+                    '60%{outline:3px solid #6366f1;box-shadow:0 0 0 3px rgba(99,102,241,0.12)}' +
+                    '}' +
+                    '.__ct_flashing{animation:__ct_flash 0.9s ease 3;outline-offset:3px;}';
+                  document.head.appendChild(s);
+                }
+                el.scrollIntoView({block:'center',behavior:'smooth'});
+                el.classList.remove('__ct_flashing');
+                void el.offsetWidth; // restart animation
+                el.classList.add('__ct_flashing');
+                setTimeout(()=>el.classList.remove('__ct_flashing'), 2800);
+              },
+              args: [msg.selector],
+            }).catch(()=>{});
+          }
+          sendResponse({ok:true});
+        })(); return true;
+
       case 'element_picked':
         // content.js already broadcasts via chrome.runtime.sendMessage which
         // reaches ALL extension pages (sidebar) directly — no relay needed.

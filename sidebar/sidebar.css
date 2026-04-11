@@ -109,12 +109,21 @@ body {
 /* ─── Message bubbles ─── */
 .sb-msg {
   display: flex;
-  gap: 8px;
+  flex-direction: column;
+  gap: 4px;
   max-width: 82%;
 }
-.sb-msg.user      { align-self: flex-end;   flex-direction: row-reverse; }
-.sb-msg.assistant { align-self: flex-start; }
+.sb-msg.user      { align-self: flex-end;   align-items: flex-end; }
+.sb-msg.assistant { align-self: flex-start; align-items: flex-start; }
 .sb-msg.system    { align-self: center; max-width: 100%; }
+
+.sb-msg-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: inherit; /* inherit alignment from parent */
+  max-width: 100%;
+}
 
 .sb-bubble {
   padding: 8px 12px;
@@ -135,6 +144,20 @@ body {
   color: #1e293b;
   border-bottom-left-radius: 4px;
   box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+
+/* Inline attachment tags below sent message */
+.sb-msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+}
+.sb-attach-tag--inline {
+  background: rgba(99,102,241,0.1);
+  border-color: rgba(99,102,241,0.22);
+  color: #4f46e5;
+  padding: 2px 6px 2px 4px;
 }
 
 /* Tool call summary row */
@@ -326,7 +349,7 @@ body {
   border: 1px solid #c4b5fd;
   color: #5b21b6;
   border-radius: 6px;
-  padding: 2px 4px 2px 7px;
+  padding: 2px 4px 2px 4px;
   font-size: 11px;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   max-width: 220px;
@@ -353,6 +376,20 @@ body {
   border-radius: 3px;
   opacity: 0.7;
 }
+.sb-attach-tag-focus {
+  flex-shrink: 0;
+  width: 16px; height: 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #7c3aed;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+  opacity: 0.6;
+  transition: opacity .15s, color .15s;
+}
+.sb-attach-tag-focus:hover { opacity: 1; color: #6366f1; }
 /* ─── Send error inline message ─── */
 .sb-send-error {
   align-self: stretch;
