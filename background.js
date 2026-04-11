@@ -1106,14 +1106,10 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
                 if (!el) return;
                 el.scrollIntoView({block:'center', behavior:'instant'});
                 const r = el.getBoundingClientRect();
-                // Remove any existing overlay
-                const old = document.getElementById('__ct_flash_ov__');
-                if (old) old.remove();
                 // Inject keyframe style once
-                const styleId = '__ct_flash_kf__';
-                if (!document.getElementById(styleId)) {
+                if (!document.getElementById('__ct_flash_kf__')) {
                   const s = document.createElement('style');
-                  s.id = styleId;
+                  s.id = '__ct_flash_kf__';
                   s.textContent =
                     '@keyframes __ct_flash_ov {' +
                     '0%{opacity:0;transform:scale(1.06)}' +
@@ -1123,24 +1119,31 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
                     '}';
                   document.head.appendChild(s);
                 }
-                const ov = document.createElement('div');
-                ov.id = '__ct_flash_ov__';
-                ov.style.cssText = [
-                  'position:fixed',
-                  'pointer-events:none',
-                  'z-index:2147483647',
-                  'left:'  + Math.round(r.left)   + 'px',
-                  'top:'   + Math.round(r.top)    + 'px',
-                  'width:' + Math.round(r.width)  + 'px',
-                  'height:'+ Math.round(r.height) + 'px',
-                  'border:2px solid #6366f1',
-                  'background:rgba(99,102,241,0.18)',
-                  'border-radius:4px',
-                  'box-shadow:0 0 0 3px rgba(99,102,241,0.25)',
-                  'animation:__ct_flash_ov 2.2s ease forwards',
-                ].join(';');
-                document.documentElement.appendChild(ov);
-                setTimeout(() => ov.remove(), 2300);
+                // Singleton overlay — create once, reuse on every call
+                let ov = document.getElementById('__ct_flash_ov__');
+                if (!ov) {
+                  ov = document.createElement('div');
+                  ov.id = '__ct_flash_ov__';
+                  ov.style.cssText =
+                    'position:fixed;pointer-events:none;z-index:2147483647;' +
+                    'border:2px solid #6366f1;background:rgba(99,102,241,0.18);' +
+                    'border-radius:4px;box-shadow:0 0 0 3px rgba(99,102,241,0.25);';
+                  document.documentElement.appendChild(ov);
+                }
+                // Update position
+                ov.style.left   = Math.round(r.left)   + 'px';
+                ov.style.top    = Math.round(r.top)    + 'px';
+                ov.style.width  = Math.round(r.width)  + 'px';
+                ov.style.height = Math.round(r.height) + 'px';
+                // Restart animation (force reflow trick)
+                ov.style.animation = 'none';
+                void ov.offsetWidth;
+                ov.style.animation = '__ct_flash_ov 2.2s ease forwards';
+                // Cancel previous reset timer and schedule new one
+                clearTimeout(window.__ct_flash_timer__);
+                window.__ct_flash_timer__ = setTimeout(() => {
+                  ov.style.animation = 'none';
+                }, 2400);
               },
               args: [msg.selector],
             }).catch(()=>{});
