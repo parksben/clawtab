@@ -34,20 +34,21 @@ const sbt = key => SB_I18N[sbLang]?.[key] ?? SB_I18N.zh[key] ?? key;
 // ── State ──────────────────────────────────────────────────────────────────
 
 const STATE = {
-  wsConnected:   false,
-  reconnecting:  false,
-  channelName:   '',
-  selectedAgent: 'main',
-  lastMsgId:     null,
-  messages:      [],
-  polling:       null,
-  sending:       false,
-  waiting:       false,   // true while waiting for agent reply
-  waitingTimer:  null,    // safety-timeout handle
-  pickMode:      false,
-  attachments:   [],      // [{ tag, id, classes, text, selector }]
-  activeTabId:   null,
-  tabStates:     {},      // { [tabId]: { input, attachments } }
+  wsConnected:        false,
+  reconnecting:       false,
+  channelName:        '',
+  selectedAgent:      'main',
+  lastMsgId:          null,
+  messages:           [],
+  pollTimer:          null,   // setTimeout handle for adaptive polling
+  sending:            false,
+  waiting:            false,  // true while waiting for agent reply
+  waitingTimer:       null,   // safety-timeout handle
+  pendingEchoContent: null,   // text of the local echo pending server confirmation
+  pickMode:           false,
+  attachments:        [],     // [{ tag, id, classes, text, selector }]
+  activeTabId:        null,
+  tabStates:          {},     // { [tabId]: { input, attachments } }
 };
 
 // Default agent list (overridden if agents.list API works)
@@ -84,6 +85,25 @@ function extractToolCalls(msg) {
   const blocks = Array.isArray(msg.content) ? msg.content
                : Array.isArray(msg.blocks)  ? msg.blocks : [];
   return blocks.filter(b => b.type === 'tool_use');
+}
+
+/**
+ * Returns true when an assistant message represents the end of a turn:
+ * - Regular text response (not just tool calls)
+ * - clawtab_cmd with a terminal action (task_done / task_fail / cancel)
+ * Pure tool calls (clawtab_cmd act/perceive, tool_use blocks) are NOT terminal
+ * because the agent is still in the middle of executing something.
+ */
+function isTerminalMsg(m) {
+  if (m.role !== 'assistant') return false;
+  const text = msgText(m);
+  const json = extractJsonBlock(text);
+  if (json?.type === 'clawtab_cmd') {
+    return ['task_done', 'task_fail', 'cancel'].includes(json.action);
+  }
+  const cleaned = text.replace(/```json[\s\S]*?```/g, '').trim();
+  if (cleaned) return true;                   // has visible text → final reply
+  return extractToolCalls(m).length === 0;    // empty message → treat as terminal
 }
 
 /** Summarise a clawtab_cmd action for display — returns HTML string */
@@ -449,12 +469,24 @@ function appendMsgNode(msg) {
 // ── Polling ────────────────────────────────────────────────────────────────
 
 function startPolling() {
-  if (STATE.polling) return;
-  STATE.polling = setInterval(fetchHistory, 3000);
+  stopPolling();
+  schedulePoll(0);
 }
 
 function stopPolling() {
-  if (STATE.polling) { clearInterval(STATE.polling); STATE.polling = null; }
+  clearTimeout(STATE.pollTimer);
+  STATE.pollTimer = null;
+}
+
+// Adaptive: 1 s while waiting for a reply, 3 s otherwise.
+function schedulePoll(ms) {
+  STATE.pollTimer = setTimeout(async () => {
+    STATE.pollTimer = null;
+    await fetchHistory();
+    if (STATE.wsConnected && STATE.channelName) {
+      schedulePoll(STATE.waiting ? 1000 : 3000);
+    }
+  }, ms);
 }
 
 async function fetchHistory() {
@@ -471,22 +503,51 @@ async function fetchHistory() {
     }
     if (!res.messages?.length) return;
 
+    // Collect new messages and advance cursor
     const freshMsgs = [];
     for (const m of res.messages) {
       STATE.lastMsgId = m.id;
       freshMsgs.push(m);
     }
+
+    // ── Local echo dedup ────────────────────────────────────────────────
+    // If the server echoes back our pending local message, replace the
+    // optimistic DOM node with the confirmed server version instead of
+    // appending a duplicate.
+    if (STATE.pendingEchoContent !== null) {
+      const idx = freshMsgs.findIndex(
+        m => m.role === 'user' && msgText(m) === STATE.pendingEchoContent
+      );
+      if (idx !== -1) {
+        // Replace local entry in STATE.messages with server-confirmed version
+        const localIdx = STATE.messages.findIndex(m => m.id?.startsWith('local-'));
+        if (localIdx !== -1) STATE.messages[localIdx] = freshMsgs[idx];
+        else                 STATE.messages.push(freshMsgs[idx]);
+        // Swap out the pending DOM node (keeps visual position)
+        const echoNode = document.querySelector('[data-local-echo]');
+        if (echoNode) {
+          const server = buildMsgNode(freshMsgs[idx]);
+          if (server) echoNode.replaceWith(server);
+          else        echoNode.remove();
+        }
+        freshMsgs.splice(idx, 1); // consumed — don't append again
+        STATE.pendingEchoContent = null;
+      }
+    }
+    // ───────────────────────────────────────────────────────────────────
+
     STATE.messages.push(...freshMsgs);
 
-    // If we were waiting for a reply, check if an assistant message arrived
-    if (STATE.waiting && freshMsgs.some(m => m.role === 'assistant')) {
+    // Clear waiting only when a terminal assistant message arrives
+    // (not on mid-task tool calls / browser commands)
+    if (STATE.waiting && freshMsgs.some(isTerminalMsg)) {
       STATE.waiting = false;
       clearTimeout(STATE.waitingTimer);
       hideThinking();
       updateSendBtn();
     }
 
-    // Incremental append (avoid full re-render flicker)
+    // Incremental append — no full re-render flicker
     const el = document.getElementById('messages');
     const emptyEl = el.querySelector('.sb-empty');
     if (emptyEl) el.innerHTML = '';
@@ -536,6 +597,10 @@ async function sendMessage() {
   const localMsg = { id: `local-${Date.now()}`, role: 'user', content: text, attachments: sentAttachments };
   STATE.messages.push(localMsg);
   appendMsgNode(localMsg);
+  // Mark the DOM node so fetchHistory can find and replace it
+  const echoNode = document.getElementById('messages').lastElementChild;
+  if (echoNode) echoNode.dataset.localEcho = '1';
+  STATE.pendingEchoContent = text; // track for server-echo dedup
 
   try {
     const res = await bg({
@@ -545,6 +610,7 @@ async function sendMessage() {
     });
     if (!res?.ok) {
       // Send failed — show inline error, don't enter waiting state
+      STATE.pendingEchoContent = null; // nothing was sent, dedup not needed
       const errMsg = res?.error || '未知错误，请检查连接后重试';
       const detail = res?.code ? ` [${res.code}]` : '';
       console.warn('[Sidebar] send failed:', errMsg, res?.code || '');
@@ -555,14 +621,17 @@ async function sendMessage() {
     STATE.waiting = true;
     updateSendBtn();
     showThinking();
-    // Safety timeout: auto-clear after 60s
+    // Safety timeout: auto-clear after 60 s and surface an error
     clearTimeout(STATE.waitingTimer);
     STATE.waitingTimer = setTimeout(() => {
+      if (!STATE.waiting) return;
       STATE.waiting = false;
       hideThinking();
       updateSendBtn();
+      appendErrorNode('Agent 未在 60 秒内响应，请检查连接或重试');
     }, 60000);
   } catch (e) {
+    STATE.pendingEchoContent = null;
     console.warn('[Sidebar] send exception:', e.message);
     appendErrorNode('发送异常：' + e.message);
   } finally {
@@ -752,21 +821,43 @@ document.getElementById('agentSelect').addEventListener('change', e => {
 // Listen to background status broadcasts
 chrome.runtime.onMessage.addListener(msg => {
   if (msg.type === 'status_update') {
-    const wasConnected  = STATE.wsConnected;
-    STATE.wsConnected   = msg.wsConnected  || false;
-    STATE.reconnecting  = msg.reconnecting || false;
-    STATE.channelName   = msg.browserId    || STATE.channelName;
-      updateStatus();
+    const wasConnected = STATE.wsConnected;
+    const prevChannel  = STATE.channelName;
+    STATE.wsConnected  = msg.wsConnected  || false;
+    STATE.reconnecting = msg.reconnecting || false;
+    STATE.channelName  = msg.browserId    || STATE.channelName;
+    updateStatus();
 
     if (!wasConnected && STATE.wsConnected) {
-      STATE.messages  = [];
-      STATE.lastMsgId = null;
+      // ── Reconnected ──────────────────────────────────────────────────
+      // Reset messages only if the channel changed; otherwise resume from
+      // where we left off so users don't see a blank flash.
+      const channelChanged = prevChannel && prevChannel !== STATE.channelName;
+      if (channelChanged) {
+        STATE.messages          = [];
+        STATE.lastMsgId         = null;
+        STATE.pendingEchoContent = null;
+      }
+      // Always clear any stuck waiting state from before the disconnect
+      STATE.waiting = false;
+      clearTimeout(STATE.waitingTimer);
+      hideThinking();
+      updateSendBtn();
       renderAll();
       fetchHistory();
       startPolling();
+
     } else if (wasConnected && !STATE.wsConnected) {
+      // ── Disconnected ─────────────────────────────────────────────────
       exitPickModeUI();
       stopPolling();
+      // Release the waiting lock so the user isn't stuck with a disabled input
+      if (STATE.waiting) {
+        STATE.waiting = false;
+        clearTimeout(STATE.waitingTimer);
+        hideThinking();
+        updateSendBtn();
+      }
       renderAll();
     }
     return;
