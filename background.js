@@ -229,6 +229,7 @@ function wsRequest(method, params, timeoutMs=10000) {
     const id = method.replace(/\./g,'_')+'-'+Date.now()+'-'+Math.random().toString(36).slice(2,6);
     const timer = setTimeout(()=>{ pendingReqs.delete(id); reject(new Error(`Timeout: ${method}`)); }, timeoutMs);
     pendingReqs.set(id,{resolve,reject,timer});
+    console.log('[ClawTab][WS OUT]', JSON.stringify({type:'req',id,method,params}).slice(0,300));
     wsSend({type:'req',id,method,params});
   });
 }
@@ -276,6 +277,11 @@ async function wsConnect(url,token,browserId) {
 
   S.ws.onmessage = async (ev) => {
     let msg; try{msg=JSON.parse(ev.data);}catch{return;}
+    // ── DEBUG: log every server message (remove once diagnosed) ──────────
+    if (msg.type==='res' && msg.id!==S.wsPendingConnectId) {
+      console.log('[ClawTab][WS IN]', JSON.stringify(msg).slice(0,400));
+    }
+    // ─────────────────────────────────────────────────────────────────────
     // challenge
     if (msg.type==='event'&&msg.event==='connect.challenge') {
       S.wsPendingNonce=msg.payload?.nonce||null;
