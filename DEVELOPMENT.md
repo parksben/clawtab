@@ -159,7 +159,7 @@ function wsDisconnect() {
 ### 6. Ed25519 签名 payload 必须使用 operator 模式
 **问题**：签名 payload 中 clientId/clientMode 必须与 connect 请求体完全一致，否则服务器校验失败，缺少 `operator.read`/`operator.write` scope 导致 chat 接口报错。
 
-**正确做法**：`signConnect` 和 connect 请求体都使用 `clientId:'webchat'`、`mode:'operator'`；同时保留 `role:'operator'` 和 `scopes:['operator.read','operator.write']`。`client.id` 必须是 Gateway JSON Schema 白名单内的合法值（`'webchat'`），`client.mode` 控制权限模式（`'operator'`），两者含义不同，签名 payload 必须与请求体完全一致。
+**正确做法**：`signConnect` 和 connect 请求体都使用 `clientId:'webchat'`、`mode:'webchat'`（Gateway schema 白名单要求），operator 权限通过 `role:'operator'` + `scopes:['operator.read','operator.write']` 字段申请，签名 payload 必须与请求体完全一致。`client.id` 和 `client.mode` 都有独立的白名单，`'clawtab'`/`'operator'` 均不在白名单内。
 
 ### 7. flash_element 叠加层必须是单例
 **问题**：每次调用 `flash_element` 都 `createElement` 会在 DOM 中堆积无数叠加层。
