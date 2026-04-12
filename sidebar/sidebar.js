@@ -770,7 +770,6 @@ async function fetchHistory() {
     const res = await bg({
       type:       'sidebar_fetch_history',
       sessionKey: sessionKey(),
-      after:      STATE.lastMsgId,
     });
     if (!res?.ok) {
       console.warn('[Sidebar] fetchHistory failed:', res?.error);
@@ -778,11 +777,14 @@ async function fetchHistory() {
     }
     if (!res.messages?.length) return;
 
+    // Deduplicate: only process messages whose IDs are not already in STATE.messages
+    const seenIds = new Set(STATE.messages.map(m => m.id).filter(Boolean));
     const freshMsgs = [];
     for (const m of res.messages) {
       STATE.lastMsgId = m.id;
-      freshMsgs.push(m);
+      if (!seenIds.has(m.id)) freshMsgs.push(m);
     }
+    if (!freshMsgs.length) return;
 
     if (STATE.pendingEchoContent !== null) {
       const idx = freshMsgs.findIndex(
