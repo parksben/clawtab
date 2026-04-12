@@ -3,52 +3,168 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ClawTab Chat</title>
+  <title>ClawTab</title>
   <link rel="stylesheet" href="sidebar.css" />
 </head>
 <body>
 
-  <div class="sidebar">
+  <!-- ══════════════════════════════════════════════
+       PAGE: Config (连接配置)
+       ══════════════════════════════════════════════ -->
+  <div class="sb-page" id="page-config">
 
-    <!-- ── Header ── -->
+    <!-- Header -->
+    <div class="sb-config-header">
+      <div class="sb-brand">
+        <svg class="sb-logo icon" width="22" height="22" aria-hidden="true">
+          <use href="#icon-link"></use>
+        </svg>
+        <div>
+          <div class="sb-brand-name">ClawTab</div>
+          <div class="sb-brand-sub" data-i18n="configSubtitle">OpenClaw Browser Client</div>
+        </div>
+      </div>
+      <div class="sb-header-tools">
+        <button class="sb-icon-btn" id="langToggle" title="Switch language">中/EN</button>
+        <button class="sb-icon-btn" id="exportConfigBtn" title="Export config">
+          <svg class="icon" width="15" height="15"><use href="#icon-arrow-right-to-line"></use></svg>
+        </button>
+        <button class="sb-icon-btn" id="importConfigBtn" title="Import config">
+          <svg class="icon" width="15" height="15"><use href="#icon-copy"></use></svg>
+        </button>
+        <input type="file" id="importFile" accept=".json,.clawtab" style="display:none" />
+      </div>
+    </div>
+
+    <!-- Body -->
+    <div class="sb-config-body">
+
+      <!-- 重连失败提示 -->
+      <div class="sb-retry-tip" id="retryTip" data-i18n="connFailed"></div>
+
+      <!-- 连接表单 -->
+      <div id="configForm">
+        <div class="sb-section-title" data-i18n="configTitle"></div>
+
+        <div class="sb-form-group">
+          <label class="sb-form-label" for="sbGatewayUrl" data-i18n="gatewayUrl"></label>
+          <input class="sb-form-input" type="url" id="sbGatewayUrl"
+                 data-i18n-ph="gatewayUrlPh" autocomplete="off" spellcheck="false" />
+        </div>
+
+        <div class="sb-form-group">
+          <label class="sb-form-label" for="sbGatewayToken" data-i18n="token"></label>
+          <div class="sb-token-row">
+            <input class="sb-form-input" type="password" id="sbGatewayToken"
+                   data-i18n-ph="tokenPh" autocomplete="off" spellcheck="false" />
+            <button class="sb-icon-btn sb-token-eye" id="toggleToken" tabindex="-1">
+              <svg class="icon" width="15" height="15"><use href="#icon-eye"></use></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="sb-form-group">
+          <label class="sb-form-label" for="sbBrowserName" data-i18n="channelName"></label>
+          <input class="sb-form-input" type="text" id="sbBrowserName"
+                 data-i18n-ph="channelNamePh" maxlength="40" autocomplete="off" spellcheck="false" />
+          <div class="sb-form-hint" data-i18n="channelNameHint"></div>
+        </div>
+
+        <button class="sb-connect-btn" id="connectBtn" data-i18n="connect"></button>
+      </div>
+
+      <!-- 配对等待（替换表单显示） -->
+      <div id="pairingSection" style="display:none">
+        <div class="sb-pairing">
+          <div class="sb-pairing-icon">
+            <svg class="icon" width="28" height="28" aria-hidden="true"><use href="#icon-link"></use></svg>
+          </div>
+          <div class="sb-pairing-title" data-i18n="pairingTitle"></div>
+          <div class="sb-pairing-desc" data-i18n="pairingDesc"></div>
+          <div class="sb-pairing-code-wrap">
+            <span class="sb-pairing-code" id="pairingCode">—</span>
+            <button class="sb-icon-btn" id="pairingCopyBtn" title="Copy">
+              <svg class="icon" width="14" height="14"><use href="#icon-copy"></use></svg>
+            </button>
+          </div>
+          <div class="sb-pairing-or" data-i18n="pairingOr"></div>
+          <div class="sb-pairing-cmd" id="pairingCmd"></div>
+          <button class="sb-cancel-btn" id="pairingCancelBtn" data-i18n="pairingCancel"></button>
+        </div>
+      </div>
+
+    </div><!-- /sb-config-body -->
+  </div><!-- /page-config -->
+
+
+  <!-- ══════════════════════════════════════════════
+       PAGE: Chat (聊天)
+       ══════════════════════════════════════════════ -->
+  <div class="sb-page" id="page-chat">
+
+    <!-- Header -->
     <div class="sb-header">
+      <svg class="sb-mini-logo icon" width="18" height="18" aria-hidden="true">
+        <use href="#icon-link"></use>
+      </svg>
       <select class="sb-agent-select" id="agentSelect">
         <option value="main">main</option>
       </select>
-      <div class="sb-status-badge" id="statusBadge">
-        <span class="sb-status-dot" id="statusDot"></span>
-        <span class="sb-status-text" id="statusText">—</span>
+      <div class="sb-header-right">
+        <div class="sb-status-badge" id="statusBadge">
+          <span class="sb-status-dot" id="statusDot"></span>
+          <span class="sb-status-text" id="statusText">—</span>
+        </div>
+        <button class="sb-icon-btn" id="langToggleChat" title="Switch language">中/EN</button>
+        <button class="sb-icon-btn sb-disconnect-btn" id="disconnectBtn" title="Disconnect">
+          <svg class="icon" width="15" height="15"><use href="#icon-power-off"></use></svg>
+        </button>
       </div>
     </div>
 
-    <!-- ── Messages ── -->
+    <!-- 任务状态栏（agent 运行中显示） -->
+    <div class="sb-task-bar" id="taskBar">
+      <div class="sb-task-info">
+        <div class="sb-task-goal" id="taskGoal"></div>
+        <div class="sb-task-status-text" id="taskStatusText"></div>
+      </div>
+      <img class="sb-task-thumb" id="taskThumb" alt="screenshot" style="display:none" />
+      <button class="sb-task-cancel" id="taskCancelBtn" data-i18n="taskCancel"></button>
+    </div>
+
+    <!-- Messages -->
     <div class="sb-messages" id="messages">
       <div class="sb-empty" id="emptyState">
-        <div class="sb-empty-icon">🦞</div>
-        <div>请先在插件面板中连接 OpenClaw</div>
+        <div class="sb-empty-icon">
+          <svg class="icon" width="40" height="40"><use href="#icon-message-square"></use></svg>
+        </div>
+        <div data-i18n="emptyChat"></div>
       </div>
     </div>
 
-    <!-- ── Input ── -->
+    <!-- Input -->
     <div class="sb-input-wrap">
       <div class="sb-autocomplete" id="pickAutocomplete"></div>
       <div class="sb-attachments" id="attachments"></div>
       <div class="sb-input-area">
-        <button class="sb-pick-btn" id="pickBtn" title="拾取页面元素" disabled>
+        <button class="sb-pick-btn" id="pickBtn" title="Pick element" disabled>
           <svg class="icon" width="14" height="14"><use href="#icon-mouse-pointer"></use></svg>
         </button>
-        <textarea
-          class="sb-input" id="msgInput"
-          placeholder="发消息… (⌘/Ctrl+Enter 发送)"
-          rows="1"
-        ></textarea>
+        <textarea class="sb-input" id="msgInput"
+          placeholder="发消息… (⌘/Ctrl+Enter 发送)" rows="1"></textarea>
         <button class="sb-send-btn" id="sendBtn" disabled>
           <svg class="icon" width="15" height="15"><use href="#icon-send"></use></svg>
         </button>
       </div>
     </div>
 
+  </div><!-- /page-chat -->
+
+  <!-- Lightbox for screenshot fullscreen -->
+  <div class="sb-lightbox" id="lightbox" style="display:none">
+    <img id="lightboxImg" alt="screenshot" />
   </div>
+
   <script src="lib/marked.min.js"></script>
   <script src="../shared/icons.js"></script>
   <script src="sidebar.js"></script>

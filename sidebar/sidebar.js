@@ -1,30 +1,95 @@
 /**
  * ClawTab sidebar.js
- * Chat UI for communicating with OpenClaw agents via the clawtab session.
+ * Two-page sidebar: Config (connection settings) + Chat (agent conversation).
+ * All popup functionality is merged here; the popup is no longer used.
  */
 
 // ── I18N ───────────────────────────────────────────────────────────────────
 
 const SB_I18N = {
   en: {
+    // ── Config page ──
+    configTitle:      'Connection Settings',
+    configSubtitle:   'OpenClaw Browser Client',
+    gatewayUrl:       'Gateway URL',
+    gatewayUrlPh:     'wss://your-gateway.example.com',
+    token:            'Access Token',
+    tokenPh:          'Paste your token here',
+    channelName:      'Channel Name',
+    channelNamePh:    'e.g. browser-home',
+    channelNameHint:  'A unique name to identify this browser',
+    connect:          'Connect',
+    connecting:       'Connecting…',
+    disconnect:       'Disconnect',
+    exportConfig:     'Export config',
+    importConfig:     'Import config',
+    importSuccess:    'Config imported!',
+    importError:      'Invalid config file',
+    connFailed:       'Connection failed — check your settings',
+    pairingTitle:     'Pairing required',
+    pairingDesc:      'Send this pairing code to your OpenClaw agent:',
+    pairingOr:        'Or run on your Gateway:',
+    pairingCancel:    'Cancel',
+    taskCancel:       'Cancel Task',
+    // ── Chat page ──
     connected:    'Connected',
     disconnected: 'Not connected',
     reconnecting: 'Reconnecting…',
     placeholderOn:  'Message… (⌘/Ctrl+Enter to send)',
-    placeholderOff: 'Connect OpenClaw in the extension popup first',
+    placeholderOff: 'Connect OpenClaw to start chatting',
     placeholderReconnecting: 'Reconnecting, please wait…',
-    emptyConnect: 'Connect OpenClaw in the extension popup first',
+    emptyConnect: 'Connect OpenClaw to start chatting',
     emptyChat:    'Send a message to {agent} to start chatting',
+    // ── Loop status texts ──
+    loopIdle:       'Ready',
+    loopPerceiving: 'Analyzing page…',
+    loopThinking:   'Thinking…',
+    loopActing:     'Executing…',
+    loopDone:       'Task complete',
+    loopFailed:     'Task failed',
+    loopCancelled:  'Cancelled',
   },
   zh: {
+    // ── Config page ──
+    configTitle:      '连接配置',
+    configSubtitle:   'OpenClaw 浏览器客户端',
+    gatewayUrl:       'Gateway 地址',
+    gatewayUrlPh:     'wss://your-gateway.example.com',
+    token:            '访问令牌',
+    tokenPh:          '粘贴令牌',
+    channelName:      '渠道名称',
+    channelNamePh:    '例：browser-home',
+    channelNameHint:  '唯一标识当前浏览器的名称',
+    connect:          '保存并连接',
+    connecting:       '连接中…',
+    disconnect:       '断开连接',
+    exportConfig:     '导出配置',
+    importConfig:     '导入配置',
+    importSuccess:    '配置已导入！',
+    importError:      '无效的配置文件',
+    connFailed:       '连接失败，请检查配置',
+    pairingTitle:     '需要配对',
+    pairingDesc:      '将配对码发送给 OpenClaw Agent：',
+    pairingOr:        '或在 Gateway 上运行：',
+    pairingCancel:    '取消',
+    taskCancel:       '取消任务',
+    // ── Chat page ──
     connected:    '已连接',
     disconnected: '未连接',
     reconnecting: '重连中…',
     placeholderOn:  '发消息… (⌘/Ctrl+Enter 发送)',
-    placeholderOff: '请先在插件中连接 OpenClaw',
+    placeholderOff: '请先连接 OpenClaw',
     placeholderReconnecting: '重连中，请稍候…',
-    emptyConnect: '请先在插件面板中连接 OpenClaw',
+    emptyConnect: '请先连接 OpenClaw',
     emptyChat:    '向 {agent} 发消息，开始对话',
+    // ── Loop status texts ──
+    loopIdle:       '就绪',
+    loopPerceiving: '正在分析页面…',
+    loopThinking:   '思考中…',
+    loopActing:     '正在执行操作…',
+    loopDone:       '任务完成',
+    loopFailed:     '任务失败',
+    loopCancelled:  '已取消',
   },
 };
 
@@ -40,18 +105,18 @@ const STATE = {
   selectedAgent:      'main',
   lastMsgId:          null,
   messages:           [],
-  pollTimer:          null,   // setTimeout handle for adaptive polling
+  pollTimer:          null,
   sending:            false,
-  waiting:            false,  // true while waiting for agent reply
-  waitingTimer:       null,   // safety-timeout handle
-  pendingEchoContent: null,   // text of the local echo pending server confirmation
+  waiting:            false,
+  waitingTimer:       null,
+  pendingEchoContent: null,
   pickMode:           false,
-  attachments:        [],     // [{ tag, id, classes, text, selector }]
+  attachments:        [],
   activeTabId:        null,
-  tabStates:          {},     // { [tabId]: { input, attachments } }
+  tabStates:          {},
+  pairingDeviceId:    null,  // stored so copy button can use it
 };
 
-// Default agent list (overridden if agents.list API works)
 const DEFAULT_AGENTS = ['main', 'dajin', 'coder', 'wechat-new', 'biz-coder'];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -73,27 +138,18 @@ function msgText(msg) {
   return '';
 }
 
-/** Extract JSON payload from a ```json ... ``` fenced block */
 function extractJsonBlock(text) {
   const m = text.match(/```json\s*([\s\S]*?)```/);
   if (!m) return null;
   try { return JSON.parse(m[1]); } catch { return null; }
 }
 
-/** Extract tool_use content blocks from a message */
 function extractToolCalls(msg) {
   const blocks = Array.isArray(msg.content) ? msg.content
                : Array.isArray(msg.blocks)  ? msg.blocks : [];
   return blocks.filter(b => b.type === 'tool_use');
 }
 
-/**
- * Returns true when an assistant message represents the end of a turn:
- * - Regular text response (not just tool calls)
- * - clawtab_cmd with a terminal action (task_done / task_fail / cancel)
- * Pure tool calls (clawtab_cmd act/perceive, tool_use blocks) are NOT terminal
- * because the agent is still in the middle of executing something.
- */
 function isTerminalMsg(m) {
   if (m.role !== 'assistant') return false;
   const text = msgText(m);
@@ -102,11 +158,10 @@ function isTerminalMsg(m) {
     return ['task_done', 'task_fail', 'cancel'].includes(json.action);
   }
   const cleaned = text.replace(/```json[\s\S]*?```/g, '').trim();
-  if (cleaned) return true;                   // has visible text → final reply
-  return extractToolCalls(m).length === 0;    // empty message → treat as terminal
+  if (cleaned) return true;
+  return extractToolCalls(m).length === 0;
 }
 
-/** Summarise a clawtab_cmd action for display — returns HTML string */
 function summariseCmd(cmd) {
   const iconMap = {
     perceive:   'eye',
@@ -142,7 +197,6 @@ function summariseCmd(cmd) {
   return `${icon(ic, 13)} ${base}${detail ? ' · ' + detail : ''}`;
 }
 
-/** Summarise a tool_use content block — returns HTML string */
 function summariseToolCall(tc) {
   const name = esc(tc.name || tc.id || 'tool');
   const input = tc.input || {};
@@ -155,7 +209,6 @@ function summariseToolCall(tc) {
   return `${icon('settings', 13)} ${name}${preview ? ' · ' + preview : ''}`;
 }
 
-/** Escape HTML */
 const esc = s => String(s)
   .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -169,17 +222,215 @@ function sanitizeHtml(html) {
     .replace(/href\s*=\s*["']?\s*javascript:[^"'\s>]*/gi, 'href="#"');
 }
 
-/** Full GFM markdown → sanitized HTML via marked */
 function formatText(raw) {
   if (!raw) return '';
   try { return sanitizeHtml(marked.parse(String(raw))); }
   catch (_) { return esc(raw).replace(/\n/g, '<br>'); }
 }
 
-// ── Thinking indicator ────────────────────────────────────────────────────
+// ── Toast ──────────────────────────────────────────────────────────────────
+
+function showToast(msg, isError = false) {
+  const el = document.createElement('div');
+  el.className = 'sb-toast ' + (isError ? 'error' : 'ok');
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2500);
+}
+
+// ── I18N application ───────────────────────────────────────────────────────
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.dataset.i18n;
+    if (key) el.textContent = sbt(key);
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+    const key = el.dataset.i18nPh;
+    if (key) el.placeholder = sbt(key);
+  });
+  // Lang toggle buttons show the opposite language label
+  const label = sbLang === 'en' ? '切换中文' : 'Switch to EN';
+  const lt1 = document.getElementById('langToggle');
+  const lt2 = document.getElementById('langToggleChat');
+  if (lt1) lt1.textContent = label;
+  if (lt2) lt2.textContent = label;
+}
+
+// ── Page routing ───────────────────────────────────────────────────────────
+
+function showPage(name) {
+  document.querySelectorAll('.sb-page').forEach(el => el.classList.remove('active'));
+  document.getElementById(`page-${name}`)?.classList.add('active');
+}
+
+function showRetryTip() {
+  document.getElementById('retryTip')?.classList.add('show');
+}
+
+function hideRetryTip() {
+  document.getElementById('retryTip')?.classList.remove('show');
+}
+
+function showPairingSection(deviceId) {
+  STATE.pairingDeviceId = deviceId || null;
+  document.getElementById('configForm').style.display = 'none';
+  document.getElementById('pairingSection').style.display = '';
+
+  const code = document.getElementById('pairingCode');
+  if (code) code.textContent = deviceId ? deviceId.slice(0, 24) + '…' : '—';
+
+  const cmd = document.getElementById('pairingCmd');
+  if (cmd) cmd.textContent = deviceId
+    ? `openclaw devices approve ${deviceId.slice(0, 16)}`
+    : 'openclaw devices approve';
+}
+
+function hidePairingSection() {
+  STATE.pairingDeviceId = null;
+  document.getElementById('configForm').style.display = '';
+  document.getElementById('pairingSection').style.display = 'none';
+}
+
+// ── Task bar ───────────────────────────────────────────────────────────────
+
+function updateTaskBar(loop) {
+  const taskBar = document.getElementById('taskBar');
+  if (!taskBar) return;
+  const status = loop?.status || 'idle';
+
+  if (status === 'idle') {
+    taskBar.classList.remove('active');
+    return;
+  }
+  taskBar.classList.add('active');
+
+  const goalEl = document.getElementById('taskGoal');
+  if (goalEl) goalEl.textContent = loop.goal || '';
+
+  const statusTextEl = document.getElementById('taskStatusText');
+  if (statusTextEl) {
+    const keyMap = {
+      perceiving: 'loopPerceiving',
+      thinking:   'loopThinking',
+      acting:     'loopActing',
+      done:       'loopDone',
+      failed:     'loopFailed',
+      cancelled:  'loopCancelled',
+    };
+    statusTextEl.textContent = loop.statusText || sbt(keyMap[status] || 'loopIdle');
+  }
+
+  const thumbEl = document.getElementById('taskThumb');
+  if (thumbEl) {
+    if (loop.lastScreenshot) {
+      thumbEl.style.display = '';
+      thumbEl.src = loop.lastScreenshot;
+    } else {
+      thumbEl.style.display = 'none';
+    }
+  }
+}
+
+// ── Config actions ─────────────────────────────────────────────────────────
+
+let _draftTimer;
+function saveDraft() {
+  clearTimeout(_draftTimer);
+  _draftTimer = setTimeout(async () => {
+    await chrome.storage.local.set({
+      gatewayUrlDraft:   document.getElementById('sbGatewayUrl')?.value.trim()   || '',
+      gatewayTokenDraft: document.getElementById('sbGatewayToken')?.value.trim() || '',
+      browserNameDraft:  document.getElementById('sbBrowserName')?.value.trim()  || '',
+    });
+  }, 600);
+}
+
+async function doConnect() {
+  const urlEl   = document.getElementById('sbGatewayUrl');
+  const tokenEl = document.getElementById('sbGatewayToken');
+  const nameEl  = document.getElementById('sbBrowserName');
+  const url   = urlEl.value.trim();
+  const token = tokenEl.value.trim();
+  const name  = nameEl.value.trim()
+              || ('browser-' + Math.random().toString(36).slice(2, 6));
+
+  if (!url) {
+    urlEl.classList.add('input-error');
+    setTimeout(() => urlEl.classList.remove('input-error'), 1500);
+    return;
+  }
+  if (!token) {
+    tokenEl.classList.add('input-error');
+    setTimeout(() => tokenEl.classList.remove('input-error'), 1500);
+    return;
+  }
+
+  await chrome.storage.local.set({
+    gatewayUrl: url, gatewayToken: token, browserName: name,
+    gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name,
+  });
+
+  const btn = document.getElementById('connectBtn');
+  btn.disabled = true;
+  btn.textContent = sbt('connecting');
+  try { await bg({ type: 'connect', url, token, name }); } catch(_) {}
+  // background will broadcast status_update; re-enable button after a moment
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = sbt('connect');
+  }, 1500);
+}
+
+async function doDisconnect() {
+  try { await bg({ type: 'disconnect' }); } catch(_) {}
+  showPage('config');
+  hidePairingSection();
+  hideRetryTip();
+}
+
+async function doExport() {
+  const d = await chrome.storage.local.get(['gatewayUrl','gatewayToken','browserName']);
+  const json = JSON.stringify({
+    _clawtab: true,
+    gatewayUrl:   d.gatewayUrl   || '',
+    gatewayToken: d.gatewayToken || '',
+    browserName:  d.browserName  || '',
+  }, null, 2);
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(new Blob([json], { type: 'application/json' })),
+    download: 'clawtab-config.json',
+  });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+async function doImport(file) {
+  try {
+    const cfg = JSON.parse(await file.text());
+    if (!cfg.gatewayUrl) throw new Error('invalid');
+    const { gatewayUrl: url = '', gatewayToken: token = '', browserName: name = '' } = cfg;
+    await chrome.storage.local.set({
+      gatewayUrl: url, gatewayToken: token, browserName: name,
+      gatewayUrlDraft: url, gatewayTokenDraft: token, browserNameDraft: name,
+    });
+    document.getElementById('sbGatewayUrl').value   = url;
+    document.getElementById('sbGatewayToken').value = token;
+    document.getElementById('sbBrowserName').value  = name;
+    try { await bg({ type: 'disconnect' }); } catch(_) {}
+    showPage('config');
+    hidePairingSection();
+    hideRetryTip();
+    showToast(sbt('importSuccess'));
+  } catch {
+    showToast(sbt('importError'), true);
+  }
+}
+
+// ── Thinking indicator ─────────────────────────────────────────────────────
 
 function showThinking() {
-  hideThinking(); // avoid duplicates
+  hideThinking();
   const el = document.getElementById('messages');
   const div = document.createElement('div');
   div.className = 'sb-thinking';
@@ -259,7 +510,7 @@ function renderAttachments() {
   });
 }
 
-// ── Autocomplete for #n:tag references ────────────────────────────────────
+// ── Autocomplete ───────────────────────────────────────────────────────────
 
 let _acActiveIdx = -1;
 
@@ -279,7 +530,7 @@ function showPickAutocomplete() {
   if (!ctx) { hidePickAutocomplete(); return; }
 
   const options = STATE.attachments
-    .map((a, i) => formatAttachLabel(a, i))          // '#1:div', '#2:span' …
+    .map((a, i) => formatAttachLabel(a, i))
     .filter(label => label.startsWith('#' + ctx.typed));
 
   if (!options.length) { hidePickAutocomplete(); return; }
@@ -292,7 +543,7 @@ function showPickAutocomplete() {
     item.textContent = label;
     item.dataset.value = label;
     item.addEventListener('mousedown', e => {
-      e.preventDefault(); // keep focus in textarea
+      e.preventDefault();
       selectAutocomplete(label);
     });
     dropdown.appendChild(item);
@@ -352,13 +603,12 @@ function renderAll() {
     return;
   }
 
-  // Filter: keep only displayable messages
   const visible = STATE.messages.filter(m => {
     const text = msgText(m);
     const json = extractJsonBlock(text);
-    if (json?.type === 'clawtab_result') return false; // hide internal browser results
+    if (json?.type === 'clawtab_result') return false;
     if (text.trim()) return true;
-    return extractToolCalls(m).length > 0; // tool_use-only messages are visible
+    return extractToolCalls(m).length > 0;
   });
 
   if (visible.length === 0) {
@@ -375,8 +625,6 @@ function renderAll() {
     const node = buildMsgNode(msg);
     if (node) el.appendChild(node);
   }
-
-  // Scroll to bottom
   el.scrollTop = el.scrollHeight;
 }
 
@@ -385,7 +633,6 @@ function buildMsgNode(msg) {
   const text = msgText(msg);
   const toolCalls = extractToolCalls(msg);
 
-  // clawtab_cmd JSON block → single tool summary row
   const json = extractJsonBlock(text);
   if (json?.type === 'clawtab_cmd') {
     const row = document.createElement('div');
@@ -394,7 +641,6 @@ function buildMsgNode(msg) {
     return row;
   }
 
-  // Tool-use-only message (no text, only tool_use blocks)
   if (!text.trim() && toolCalls.length) {
     const wrap = document.createElement('div');
     wrap.style.cssText = 'display:contents';
@@ -407,7 +653,6 @@ function buildMsgNode(msg) {
     return wrap;
   }
 
-  // Regular message — strip json fenced blocks then render
   const cleaned = text.replace(/```json[\s\S]*?```/g, '').trim();
   if (!cleaned && !toolCalls.length) return null;
 
@@ -424,7 +669,6 @@ function buildMsgNode(msg) {
     body.appendChild(bubble);
   }
 
-  // Any tool_use blocks from content array shown below the text bubble
   for (const tc of toolCalls) {
     const row = document.createElement('div');
     row.className = 'sb-tool-row';
@@ -432,7 +676,6 @@ function buildMsgNode(msg) {
     body.appendChild(row);
   }
 
-  // Inline attachment tags below user messages
   if (role === 'user' && msg.attachments?.length) {
     const tagsDiv = document.createElement('div');
     tagsDiv.className = 'sb-msg-attachments';
@@ -467,7 +710,7 @@ function appendErrorNode(text) {
 function appendMsgNode(msg) {
   const el = document.getElementById('messages');
   const emptyEl = el.querySelector('.sb-empty');
-  if (emptyEl) el.innerHTML = ''; // clear empty state on first real message
+  if (emptyEl) el.innerHTML = '';
   const node = buildMsgNode(msg);
   if (node) {
     el.appendChild(node);
@@ -487,7 +730,6 @@ function stopPolling() {
   STATE.pollTimer = null;
 }
 
-// Adaptive: 1 s while waiting for a reply, 3 s otherwise.
 function schedulePoll(ms) {
   STATE.pollTimer = setTimeout(async () => {
     STATE.pollTimer = null;
@@ -512,43 +754,33 @@ async function fetchHistory() {
     }
     if (!res.messages?.length) return;
 
-    // Collect new messages and advance cursor
     const freshMsgs = [];
     for (const m of res.messages) {
       STATE.lastMsgId = m.id;
       freshMsgs.push(m);
     }
 
-    // ── Local echo dedup ────────────────────────────────────────────────
-    // If the server echoes back our pending local message, replace the
-    // optimistic DOM node with the confirmed server version instead of
-    // appending a duplicate.
     if (STATE.pendingEchoContent !== null) {
       const idx = freshMsgs.findIndex(
         m => m.role === 'user' && msgText(m) === STATE.pendingEchoContent
       );
       if (idx !== -1) {
-        // Replace local entry in STATE.messages with server-confirmed version
         const localIdx = STATE.messages.findIndex(m => m.id?.startsWith('local-'));
         if (localIdx !== -1) STATE.messages[localIdx] = freshMsgs[idx];
         else                 STATE.messages.push(freshMsgs[idx]);
-        // Swap out the pending DOM node (keeps visual position)
         const echoNode = document.querySelector('[data-local-echo]');
         if (echoNode) {
           const server = buildMsgNode(freshMsgs[idx]);
           if (server) echoNode.replaceWith(server);
           else        echoNode.remove();
         }
-        freshMsgs.splice(idx, 1); // consumed — don't append again
+        freshMsgs.splice(idx, 1);
         STATE.pendingEchoContent = null;
       }
     }
-    // ───────────────────────────────────────────────────────────────────
 
     STATE.messages.push(...freshMsgs);
 
-    // Clear waiting only when a terminal assistant message arrives
-    // (not on mid-task tool calls / browser commands)
     if (STATE.waiting && freshMsgs.some(isTerminalMsg)) {
       STATE.waiting = false;
       clearTimeout(STATE.waitingTimer);
@@ -556,7 +788,6 @@ async function fetchHistory() {
       updateSendBtn();
     }
 
-    // Incremental append — no full re-render flicker
     const el = document.getElementById('messages');
     const emptyEl = el.querySelector('.sb-empty');
     if (emptyEl) el.innerHTML = '';
@@ -581,15 +812,12 @@ async function sendMessage() {
   input.value  = '';
   input.style.height = '';
 
-  // Build message text, appending element reference context as a JSON block.
-  // Background's sendResult uses the same ```json``` convention, so OpenClaw's
-  // agent pipeline already knows how to extract selector + screenshot from it.
   let fullText = text;
   if (STATE.attachments.length > 0) {
     const refs = STATE.attachments.map((a, i) => {
       const ref = { ref: formatAttachLabel(a, i), selector: a.selector, tag: a.tag };
       if (a.text)       ref.text       = a.text.slice(0, 80);
-      if (a.screenshot) ref.screenshot = a.screenshot;  // base64 JPEG data URL
+      if (a.screenshot) ref.screenshot = a.screenshot;
       return ref;
     });
     fullText += '\n\n```json\n' +
@@ -597,19 +825,16 @@ async function sendMessage() {
       '\n```';
   }
 
-  // Clear attachments immediately on send (save copy for bubble)
   const sentAttachments = [...STATE.attachments];
   STATE.attachments = [];
   renderAttachments();
 
-  // Optimistic local echo (show original text only, not the appended context)
   const localMsg = { id: `local-${Date.now()}`, role: 'user', content: text, attachments: sentAttachments };
   STATE.messages.push(localMsg);
   appendMsgNode(localMsg);
-  // Mark the DOM node so fetchHistory can find and replace it
   const echoNode = document.getElementById('messages').lastElementChild;
   if (echoNode) echoNode.dataset.localEcho = '1';
-  STATE.pendingEchoContent = text; // track for server-echo dedup
+  STATE.pendingEchoContent = text;
 
   try {
     const res = await bg({
@@ -618,19 +843,16 @@ async function sendMessage() {
       message:    fullText,
     });
     if (!res?.ok) {
-      // Send failed — show inline error, don't enter waiting state
-      STATE.pendingEchoContent = null; // nothing was sent, dedup not needed
+      STATE.pendingEchoContent = null;
       const errMsg = res?.error || '未知错误，请检查连接后重试';
       const detail = res?.code ? ` [${res.code}]` : '';
       console.warn('[Sidebar] send failed:', errMsg, res?.code || '');
       appendErrorNode(errMsg + detail);
-      return; // finally block will re-enable the send button
+      return;
     }
-    // Show thinking indicator and lock send until agent replies
     STATE.waiting = true;
     updateSendBtn();
     showThinking();
-    // Safety timeout: auto-clear after 60 s and surface an error
     clearTimeout(STATE.waitingTimer);
     STATE.waitingTimer = setTimeout(() => {
       if (!STATE.waiting) return;
@@ -649,7 +871,7 @@ async function sendMessage() {
   }
 }
 
-// ── Status ─────────────────────────────────────────────────────────────────
+// ── Status (chat page) ─────────────────────────────────────────────────────
 
 function updateStatus() {
   const dot       = document.getElementById('statusDot');
@@ -659,26 +881,26 @@ function updateStatus() {
   const pickBtn   = document.getElementById('pickBtn');
 
   if (STATE.wsConnected) {
-    dot.className     = 'sb-status-dot connected';
-    text.textContent  = sbt('connected');
-    input.disabled    = false;
-    input.placeholder = sbt('placeholderOn');
+    if (dot)       dot.className     = 'sb-status-dot connected';
+    if (text)      text.textContent  = sbt('connected');
+    if (input)     input.disabled    = false;
+    if (input)     input.placeholder = sbt('placeholderOn');
     inputArea?.classList.remove('sb-disconnected');
-    if (pickBtn) pickBtn.disabled = false;
+    if (pickBtn)   pickBtn.disabled  = false;
   } else if (STATE.reconnecting) {
-    dot.className     = 'sb-status-dot connecting';
-    text.textContent  = sbt('reconnecting');
-    input.disabled    = true;
-    input.placeholder = sbt('placeholderReconnecting');
+    if (dot)       dot.className     = 'sb-status-dot connecting';
+    if (text)      text.textContent  = sbt('reconnecting');
+    if (input)     input.disabled    = true;
+    if (input)     input.placeholder = sbt('placeholderReconnecting');
     inputArea?.classList.add('sb-disconnected');
-    if (pickBtn) pickBtn.disabled = true;
+    if (pickBtn)   pickBtn.disabled  = true;
   } else {
-    dot.className     = 'sb-status-dot';
-    text.textContent  = sbt('disconnected');
-    input.disabled    = true;
-    input.placeholder = sbt('placeholderOff');
+    if (dot)       dot.className     = 'sb-status-dot';
+    if (text)      text.textContent  = sbt('disconnected');
+    if (input)     input.disabled    = true;
+    if (input)     input.placeholder = sbt('placeholderOff');
     inputArea?.classList.add('sb-disconnected');
-    if (pickBtn) pickBtn.disabled = true;
+    if (pickBtn)   pickBtn.disabled  = true;
   }
   updateSendBtn();
 }
@@ -687,6 +909,7 @@ function updateStatus() {
 
 async function loadAgents() {
   const sel = document.getElementById('agentSelect');
+  if (!sel) return;
   sel.innerHTML = '';
 
   let agents = DEFAULT_AGENTS;
@@ -725,24 +948,50 @@ function switchAgent(newAgent) {
 // ── Init ───────────────────────────────────────────────────────────────────
 
 async function init() {
-  // Load language setting from storage (shared with popup)
+  // 1. Language
   try {
     const stored = await chrome.storage.local.get('lang');
     if (stored.lang) sbLang = stored.lang;
   } catch (_) {}
+  applyI18n();
 
-  await loadAgents();
-
+  // 2. Populate form drafts
   try {
-    const s = await bg({ type: 'get_status' });
-    if (s) {
-      STATE.wsConnected  = s.wsConnected  || false;
-      STATE.reconnecting = s.reconnecting || false;
-      STATE.channelName  = s.browserId    || '';
-    }
+    const d = await chrome.storage.local.get([
+      'gatewayUrlDraft', 'gatewayTokenDraft', 'browserNameDraft',
+      'gatewayUrl', 'gatewayToken', 'browserName',
+    ]);
+    document.getElementById('sbGatewayUrl').value   = d.gatewayUrlDraft   || d.gatewayUrl   || '';
+    document.getElementById('sbGatewayToken').value = d.gatewayTokenDraft || d.gatewayToken || '';
+    document.getElementById('sbBrowserName').value  = d.browserNameDraft  || d.browserName  || '';
   } catch (_) {}
 
-  // Track which tab is currently active for input/attachment state persistence
+  // 3. Get status and route to correct page
+  let s = null;
+  try { s = await bg({ type: 'get_status' }); } catch (_) {}
+
+  if (s) {
+    STATE.wsConnected  = s.wsConnected  || false;
+    STATE.reconnecting = s.reconnecting || false;
+    STATE.channelName  = s.browserId    || '';
+
+    if (s.pairingPending) {
+      showPage('config');
+      showPairingSection(s.deviceId);
+    } else if (s.wsConnected) {
+      showPage('chat');
+      updateTaskBar(s.loop);
+    } else {
+      showPage('config');
+      hidePairingSection();
+      if (s.gaveUp) showRetryTip(); else hideRetryTip();
+    }
+  } else {
+    showPage('config');
+  }
+
+  // 4. Load agents and resolve active tab
+  await loadAgents();
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) STATE.activeTabId = tab.id;
@@ -758,6 +1007,67 @@ async function init() {
 }
 
 // ── Event listeners ────────────────────────────────────────────────────────
+
+// ── Config page events ──
+
+document.getElementById('connectBtn').addEventListener('click', doConnect);
+
+document.getElementById('disconnectBtn').addEventListener('click', doDisconnect);
+
+document.getElementById('pairingCancelBtn').addEventListener('click', async () => {
+  try { await bg({ type: 'disconnect' }); } catch(_) {}
+  showPage('config');
+  hidePairingSection();
+  hideRetryTip();
+});
+
+document.getElementById('pairingCopyBtn').addEventListener('click', async () => {
+  const deviceId = STATE.pairingDeviceId;
+  if (!deviceId) return;
+  const cmd = `openclaw devices approve ${deviceId}`;
+  try {
+    await navigator.clipboard.writeText(cmd);
+    const btn = document.getElementById('pairingCopyBtn');
+    const origHtml = btn.innerHTML;
+    btn.innerHTML = `<svg class="icon" width="14" height="14"><use href="#icon-check"></use></svg>`;
+    setTimeout(() => { btn.innerHTML = origHtml; }, 2000);
+  } catch (_) {}
+});
+
+// Lang toggles (both config and chat pages)
+function handleLangToggle() {
+  sbLang = sbLang === 'en' ? 'zh' : 'en';
+  chrome.storage.local.set({ lang: sbLang });
+  applyI18n();
+  updateStatus();
+}
+document.getElementById('langToggle').addEventListener('click', handleLangToggle);
+document.getElementById('langToggleChat').addEventListener('click', handleLangToggle);
+
+// Export / import
+document.getElementById('exportConfigBtn').addEventListener('click', doExport);
+document.getElementById('importConfigBtn').addEventListener('click', () => {
+  document.getElementById('importFile').click();
+});
+document.getElementById('importFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  await doImport(file);
+  e.target.value = '';
+});
+
+// Token eye toggle
+document.getElementById('toggleToken').addEventListener('click', () => {
+  const inp = document.getElementById('sbGatewayToken');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+});
+
+// Form draft auto-save
+['sbGatewayUrl', 'sbGatewayToken', 'sbBrowserName'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', saveDraft);
+});
+
+// ── Chat page events ──
 
 document.getElementById('sendBtn').addEventListener('click', sendMessage);
 
@@ -790,7 +1100,6 @@ document.getElementById('msgInput').addEventListener('keydown', e => {
         selectAutocomplete(items[_acActiveIdx].dataset.value);
         return;
       }
-      // Tab with no selection: pick first option
       if (e.key === 'Tab' && items.length) {
         e.preventDefault();
         selectAutocomplete(items[0].dataset.value);
@@ -813,13 +1122,11 @@ document.getElementById('msgInput').addEventListener('keydown', e => {
 document.getElementById('msgInput').addEventListener('input', e => {
   e.target.style.height = 'auto';
   e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-  // Trigger autocomplete whenever there are attachments
   if (STATE.attachments.length > 0) showPickAutocomplete();
   else hidePickAutocomplete();
 });
 
 document.getElementById('msgInput').addEventListener('blur', () => {
-  // Delay so mousedown on a dropdown item fires before blur hides it
   setTimeout(hidePickAutocomplete, 150);
 });
 
@@ -827,7 +1134,30 @@ document.getElementById('agentSelect').addEventListener('change', e => {
   switchAgent(e.target.value);
 });
 
-// Listen to background status broadcasts
+// Task cancel
+document.getElementById('taskCancelBtn').addEventListener('click', async () => {
+  try { await bg({ type: 'cancel' }); } catch(_) {}
+});
+
+// Task thumbnail → lightbox
+document.getElementById('taskThumb').addEventListener('click', () => {
+  const src = document.getElementById('taskThumb').src;
+  if (!src) return;
+  const lb    = document.getElementById('lightbox');
+  const lbImg = document.getElementById('lightboxImg');
+  if (lb && lbImg) {
+    lbImg.src = src;
+    lb.style.display = 'flex';
+  }
+});
+
+// Lightbox dismiss
+document.getElementById('lightbox').addEventListener('click', () => {
+  document.getElementById('lightbox').style.display = 'none';
+});
+
+// ── Background messages ──
+
 chrome.runtime.onMessage.addListener(msg => {
   if (msg.type === 'status_update') {
     const wasConnected = STATE.wsConnected;
@@ -835,19 +1165,31 @@ chrome.runtime.onMessage.addListener(msg => {
     STATE.wsConnected  = msg.wsConnected  || false;
     STATE.reconnecting = msg.reconnecting || false;
     STATE.channelName  = msg.browserId    || STATE.channelName;
+
+    // ── Page routing ──
+    if (msg.pairingPending) {
+      showPage('config');
+      showPairingSection(msg.deviceId);
+    } else if (msg.wsConnected) {
+      showPage('chat');
+      hidePairingSection();
+      hideRetryTip();
+      updateTaskBar(msg.loop);
+    } else {
+      showPage('config');
+      hidePairingSection();
+      if (msg.gaveUp) showRetryTip(); else hideRetryTip();
+    }
+
     updateStatus();
 
     if (!wasConnected && STATE.wsConnected) {
-      // ── Reconnected ──────────────────────────────────────────────────
-      // Reset messages only if the channel changed; otherwise resume from
-      // where we left off so users don't see a blank flash.
       const channelChanged = prevChannel && prevChannel !== STATE.channelName;
       if (channelChanged) {
-        STATE.messages          = [];
-        STATE.lastMsgId         = null;
+        STATE.messages           = [];
+        STATE.lastMsgId          = null;
         STATE.pendingEchoContent = null;
       }
-      // Always clear any stuck waiting state from before the disconnect
       STATE.waiting = false;
       clearTimeout(STATE.waitingTimer);
       hideThinking();
@@ -857,10 +1199,8 @@ chrome.runtime.onMessage.addListener(msg => {
       startPolling();
 
     } else if (wasConnected && !STATE.wsConnected) {
-      // ── Disconnected ─────────────────────────────────────────────────
       exitPickModeUI();
       stopPolling();
-      // Release the waiting lock so the user isn't stuck with a disabled input
       if (STATE.waiting) {
         STATE.waiting = false;
         clearTimeout(STATE.waitingTimer);
@@ -869,11 +1209,13 @@ chrome.runtime.onMessage.addListener(msg => {
       }
       renderAll();
     }
+
+    // Update task bar if already on chat page
+    if (msg.wsConnected) updateTaskBar(msg.loop);
     return;
   }
 
   if (msg.type === 'element_picked') {
-    // Auto-exit pick mode after one element is picked
     exitPickModeUI();
     STATE.attachments.push(msg.element);
     renderAttachments();
@@ -881,7 +1223,6 @@ chrome.runtime.onMessage.addListener(msg => {
   }
 
   if (msg.type === 'pick_mode_exited') {
-    // Escape pressed in page
     exitPickModeUI();
     return;
   }
@@ -891,15 +1232,9 @@ chrome.runtime.onMessage.addListener(msg => {
     const newTabId  = msg.tabId;
     if (prevTabId === newTabId) return;
 
-    // Save input + attachments for the tab we're leaving
     saveTabState(prevTabId);
-
-    // Exit pick mode (background already sent exit_pick_mode to all tabs)
     exitPickModeUI();
-
     STATE.activeTabId = newTabId;
-
-    // Restore or clear for the new tab
     restoreTabState(newTabId);
     return;
   }
@@ -908,20 +1243,19 @@ chrome.runtime.onMessage.addListener(msg => {
 // ── Boot ───────────────────────────────────────────────────────────────────
 init();
 
-// Notify background this sidebar is open
-chrome.runtime.sendMessage({ type: 'sidebar_opened' }).catch(()=>{});
+chrome.runtime.sendMessage({ type: 'sidebar_opened' }).catch(() => {});
 
-// Notify background when user closes the sidebar via Chrome's built-in UI
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') {
-    chrome.runtime.sendMessage({ type: 'sidebar_closed' }).catch(()=>{});
+    chrome.runtime.sendMessage({ type: 'sidebar_closed' }).catch(() => {});
   }
 });
 
-// Sync language if user changes it in the popup while sidebar is open
+// Sync language if changed externally (e.g. by another session)
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.lang) {
     sbLang = changes.lang.newValue || 'zh';
+    applyI18n();
     updateStatus();
     renderAll();
   }

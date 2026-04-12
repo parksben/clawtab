@@ -1290,6 +1290,12 @@ chrome.alarms.onAlarm.addListener(alarm=>{
   if(S.wsConnected&&!S.pollTimer&&!S.pollPaused) schedulePoll(0);
 });
 
+// 点击扩展图标直接打开 sidebar（无 popup）
+chrome.action.onClicked.addListener(async (tab) => {
+  if (tab?.windowId)
+    await chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => {});
+});
+
 async function init() {
   drawIcon('idle');
   S.deviceIdentity=await loadOrCreateDevice();
