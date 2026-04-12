@@ -15,22 +15,16 @@
 
     <!-- Header -->
     <div class="sb-config-header">
-      <div class="sb-brand">
-        <svg class="sb-logo icon" width="22" height="22" aria-hidden="true">
-          <use href="#icon-link"></use>
-        </svg>
-        <div>
-          <div class="sb-brand-name">ClawTab</div>
-          <div class="sb-brand-sub" data-i18n="configSubtitle">OpenClaw Browser Client</div>
-        </div>
-      </div>
+      <div class="sb-config-title" data-i18n="connectTitle">Connect OpenClaw</div>
       <div class="sb-header-tools">
-        <button class="sb-icon-btn" id="langToggle" title="Switch language">中/EN</button>
-        <button class="sb-icon-btn" id="exportConfigBtn" title="Export config">
-          <svg class="icon" width="15" height="15"><use href="#icon-arrow-right-to-line"></use></svg>
+        <button class="sb-icon-btn" id="langToggle">
+          <svg class="icon" width="15" height="15"><use href="#icon-globe"></use></svg>
         </button>
-        <button class="sb-icon-btn" id="importConfigBtn" title="Import config">
-          <svg class="icon" width="15" height="15"><use href="#icon-copy"></use></svg>
+        <button class="sb-icon-btn" id="exportConfigBtn">
+          <svg class="icon" width="15" height="15"><use href="#icon-download"></use></svg>
+        </button>
+        <button class="sb-icon-btn" id="importConfigBtn">
+          <svg class="icon" width="15" height="15"><use href="#icon-folder-open"></use></svg>
         </button>
         <input type="file" id="importFile" accept=".json,.clawtab" style="display:none" />
       </div>
