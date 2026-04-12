@@ -49,24 +49,6 @@ The session `agent:main:clawtab-{channel}` appears in the OpenClaw Web UI.
 - **Exclusive agent lock** — one agent at a time; concurrent requests are rejected with a clear reason
 - **Bilingual UI** — English / Chinese, switchable in the sidebar
 
-## Agent Protocol
-
-Agents control the browser by embedding a `clawtab_cmd` JSON block in a chat message:
-
-```json
-{
-  "type": "clawtab_cmd",
-  "cmdId": "act-001",
-  "action": "act",
-  "agentId": "main",
-  "payload": { "op": "click", "target": ".submit-btn", "captureAfter": true }
-}
-```
-
-ClawTab executes the command and replies with a `clawtab_result` block (hidden from the sidebar UI, visible only to the agent).
-
-See [AGENT_PROTOCOL.md](./AGENT_PROTOCOL.md) for the full command reference.
-
 ## Privacy & Security
 
 ClawTab only connects to the Gateway URL you explicitly configure. No data is sent to any third-party services.

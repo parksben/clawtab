@@ -49,24 +49,6 @@ Web UI 中可找到 `agent:main:clawtab-{渠道名称}` 会话。
 - **互斥占用锁** — 同一时间只允许一个 Agent 控制浏览器
 - **中英文切换** — 侧边栏支持一键切换语言
 
-## Agent 协议
-
-Agent 通过在聊天消息中嵌入 `clawtab_cmd` JSON 块来控制浏览器：
-
-```json
-{
-  "type": "clawtab_cmd",
-  "cmdId": "act-001",
-  "action": "act",
-  "agentId": "main",
-  "payload": { "op": "click", "target": ".submit-btn", "captureAfter": true }
-}
-```
-
-ClawTab 执行后回复 `clawtab_result` 块（侧边栏不显示，仅 Agent 可见）。
-
-完整命令参考见 [AGENT_PROTOCOL.md](./AGENT_PROTOCOL.md)。
-
 ## 隐私与安全
 
 ClawTab 仅连接到你明确配置的 Gateway 地址，不向任何第三方服务发送数据。
