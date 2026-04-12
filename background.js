@@ -59,7 +59,6 @@ const S = {
 
   // Stats
   tabCount: 0, lastCmd: '',
-  sidebarOpen: false,
 };
 
 // ═══════════════════════════════════════════════════════
@@ -111,11 +110,11 @@ function drawIcon(state) {
 }
 
 // ═══════════════════════════════════════════════════════
-// SECTION 4: Broadcast to popup
+// SECTION 4: Broadcast to sidebar
 // ═══════════════════════════════════════════════════════
 
 function broadcast(msg) {
-  // Send to extension pages (popup, sidebar)
+  // Send to extension pages (sidebar)
   chrome.runtime.sendMessage(msg).catch(()=>{});
   // Send to content scripts in all normal tabs
   chrome.tabs.query({}, tabs => {
@@ -139,7 +138,6 @@ function broadcastStatus() {
     wsUrl:         S.wsUrl,
     tabCount:      S.tabCount,
     lastCmd:       S.lastCmd,
-    sidebarOpen:   S.sidebarOpen,
     loop: {
       status:         S.loop.status,
       goal:           S.loop.goal,
@@ -158,7 +156,7 @@ function broadcastStatus() {
 
 function setLoopStatus(status, statusText, extra = {}) {
   S.loop.status = status;
-  // statusText 是动态内容（如操作描述），留空则 popup 用 i18n
+  // statusText 是动态内容（如操作描述），留空则 sidebar 用 i18n key 翻译
   S.loop.statusText = statusText || '';
   Object.assign(S.loop, extra);
   const iconState = ['perceiving','thinking','acting'].includes(status)
@@ -262,7 +260,7 @@ async function wsConnect(url,token,browserId) {
   S.wsUrl=url; S.wsToken=token; S.browserId=browserId;
   S.sessionKey=`agent:main:clawtab-${browserId}`;
   // 注意：不在这里重置 wsReconnectCount / wsReconnectDelay
-  // 重置只在用户主动发起连接时（popup handler / init）执行，
+  // 重置只在用户主动发起连接时（connect handler / init）执行，
   // 这样 wsScheduleReconnect 的计数器才能真正累计并在 3 次后 giveUp。
   drawIcon('connecting'); broadcastStatus();
   console.log('[ClawTab] wsConnect →', url, '| channel:', browserId, '| retry#', S.wsReconnectCount);
@@ -1018,7 +1016,7 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         sendResponse({wsConnected:S.wsConnected,pairingPending:S.pairingPending,
           reconnecting: !S.wsConnected && !!S.wsUrl && !S.pairingPending,
           deviceId:S.deviceIdentity?.id||'',
-          browserId:S.browserId, sidebarOpen:S.sidebarOpen,
+          browserId:S.browserId,
           wsUrl:S.wsUrl,tabCount:S.tabCount,lastCmd:S.lastCmd,loop:{
             status:S.loop.status,goal:S.loop.goal,agentId:S.loop.agentId,
             stepIndex:S.loop.stepIndex,history:S.loop.history.slice(-8),
@@ -1079,18 +1077,10 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         return true;
 
       case 'sidebar_opened':
-        S.sidebarOpen = true; broadcastStatus(); sendResponse({ok:true}); break;
+        sendResponse({ok:true}); break;
 
       case 'sidebar_closed':
-        S.sidebarOpen = false; broadcastStatus(); sendResponse({ok:true}); break;
-
-      case 'close_sidebar':
-        S.sidebarOpen = false;
-        // Disable panel (closes it), then re-enable so it can be opened again
-        chrome.sidePanel.setOptions({ path: 'sidebar/sidebar.html', enabled: false })
-          .then(() => chrome.sidePanel.setOptions({ path: 'sidebar/sidebar.html', enabled: true }))
-          .catch(()=>{});
-        broadcastStatus(); sendResponse({ok:true}); break;
+        sendResponse({ok:true}); break;
 
       // ── Element picker handlers ──
       case 'enter_pick_mode':
