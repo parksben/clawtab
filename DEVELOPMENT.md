@@ -171,6 +171,21 @@ function wsDisconnect() {
 
 **正确做法**：在 `status_update` 的 disconnected 分支强制 `STATE.waiting=false` + `hideThinking()`。
 
+### 9. doPoll 每次取回全量消息，SW 重启后旧指令会被重复执行
+**问题**：`chat.history` 始终返回最近 20 条消息，`processedCmds` 是内存 Set，Service Worker 重启后清空，导致旧 `clawtab_cmd` 再次被 `handleCmd` 处理。
+
+**正确做法**：在 `doPoll()` 里根据 `lastSeenMsgId` 找到切片起点，只迭代新消息：
+```javascript
+const allMsgs = res.messages || [];
+const seenIdx = S.lastSeenMsgId ? allMsgs.findIndex(m => m.id === S.lastSeenMsgId) : -1;
+const newMsgs = seenIdx >= 0 ? allMsgs.slice(seenIdx + 1) : allMsgs;
+```
+
+### 10. sendHandshake 的 !lastSeenMsgId 检查不足以防重发
+**问题**：SW 重启 → `syncLastSeenId()` 从 storage 还原 `lastSeenMsgId` → 但若是全新 session（没有 `lastSeenMsgId`），`sendHandshake` 被调用；如果 SW 在握手成功写入 `lastSeenMsgId` 之前再次重启，握手再次触发。
+
+**正确做法**：`sendHandshake()` 在调用 API **前**就把 `hs_{sessionKey}` 写入 storage；发送成功时保留标志，发送失败时撤销（下次重试）。connect-ok handler 同时检查 `!lastSeenMsgId && !hsFlag[hsKey]`。
+
 ## 关键 ID 和配置
 
 | 项目 | 值 |

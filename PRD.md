@@ -140,9 +140,12 @@ Agent 通过聊天会话发送 `clawtab_cmd` JSON 块触发自动化：
 | 12 | flash_element 动效每次都新建 overlay div | ✅ 改为单例复用，animation:none + offsetWidth 重启动画 |
 | 13 | `client.id='clawtab'` 被 Gateway JSON Schema 拒绝（1008 错误） | ✅ 改用 `openclaw-control-ui`（Gateway 合法值之一） |
 | 14 | `sessions.create` / `chat.send` / `chat.history` Schema 不匹配 | ✅ sessionKey→key，删除 channel，补 idempotencyKey，删除 after 字段 |
-| 15 | 握手消息在每次 Service Worker 重启后重复发送 | ✅ 以 `!S.lastSeenMsgId` 判断新会话，reconnect 时跳过 |
+| 15 | 握手消息在每次 Service Worker 重启后重复发送 | ✅ 持久化 `hs_{sessionKey}` 标志（API 调用前写入，失败时撤销）+ connect-ok 双重检查 |
 | 16 | 手动断连后插件自动重连 | ✅ `wsManualDisconnect` 标志持久化到 storage，alarms / init() 均检查 |
 | 17 | sidebar.html pairing 区域误写 `${icon(...)}` 模板字符串 | ✅ 改为 `<svg><use href="#icon-link"></use></svg>` |
+| 18 | SW 重启后 doPoll 重放历史消息，旧 clawtab_cmd 被重复执行 | ✅ doPoll 用 lastSeenMsgId 定位切片，只处理新消息 |
+| 19 | 连接配置顶栏显示品牌信息；语言/导出/导入按钮语义不直观 | ✅ 顶栏改为功能标题 "Connect OpenClaw"；语言改 globe 图标；导出/导入改 download / folder-open |
+| 20 | 点击连接后按钮立即恢复可点击（1.5 s setTimeout），可重复触发 | ✅ 改用 loading class + CSS spinner；由 showPage('config') 统一重置按钮状态 |
 
 ## 技术约束
 
