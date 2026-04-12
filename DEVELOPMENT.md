@@ -11,17 +11,17 @@ clawtab/
 ├── manifest.json              # Chrome Extension Manifest V3
 ├── background.js              # Service Worker — WebSocket 通信、设备配对、clawtab_cmd 执行引擎、sidebar 消息处理
 ├── popup/
-│   ├── popup.html             # 弹出窗口 HTML
+│   ├── popup.html             # 弹出窗口 HTML（已不再作为 action popup，保留备用）
 │   ├── popup.css              # 弹出窗口样式
-│   └── popup.js               # 弹出窗口逻辑 — UI 渲染、事件绑定、i18n
+│   └── popup.js               # 弹出窗口逻辑（已不再作为主入口）
 ├── sidebar/
-│   ├── sidebar.html           # 侧边栏 HTML（Chrome Side Panel）
-│   ├── sidebar.css            # 侧边栏样式（与 popup 同风格）
-│   ├── sidebar.js             # 侧边栏逻辑 — 聊天、Agent 切换、轮询、元素拾取
+│   ├── sidebar.html           # 侧边栏 HTML — 两页：#page-config（连接配置）+ #page-chat（聊天）
+│   ├── sidebar.css            # 侧边栏样式（Config 页 + Chat 页）
+│   ├── sidebar.js             # 侧边栏逻辑 — I18N、Config 表单、页面路由、聊天、Agent 切换、轮询、元素拾取
 │   └── lib/
 │       └── marked.min.js      # marked.js v15.0.12（GFM markdown 渲染，本地内置）
 ├── shared/
-│   └── icons.js               # Lucide SVG sprite（popup 和 sidebar 共用）
+│   └── icons.js               # Lucide SVG sprite（sidebar 使用）
 ├── content/
 │   └── content.js             # Content Script — 元素高亮拾取、flash 动效、DOM 提取
 ├── icons/
@@ -75,10 +75,11 @@ olfpncdbjlggonplhnlnbhkfianddhmp
        │ chrome.runtime                  │
        │ .sendMessage()                  │ Agent 读写
        │                                │ clawtab-{channel} session
-  ┌────┴────┐   ┌──────────┐   ┌────────┴──────────┐
-  │ popup.js │   │sidebar.js│   │    AI Agent        │
-  │ (UI 渲染)│   │ (聊天 UI)│   │    (main/dajin)    │
-  └─────────┘   └──────────┘   └───────────────────┘
+  ┌────┴──────────┐          ┌──────────┴──────────┐
+  │  sidebar.js   │          │    AI Agent          │
+  │ (Config 页 +  │          │    (main/dajin)      │
+  │  Chat 页)     │          └─────────────────────┘
+  └───────────────┘
 ```
 
 ### 连接流程
@@ -108,18 +109,17 @@ Agent 写入 clawtab_cmd（task_done）→ 更新工具栏图标为完成状态
 
 ### sidebar.js 核心机制
 
+- **两页路由**：`showPage('config')` / `showPage('chat')` 切换 `.sb-page.active`，由 `status_update` 消息驱动
+- **Config 页**：表单 + 草稿 debounce（600ms）+ 配对码展示（`showPairingSection` 替换表单）+ 重连失败横幅
+- **Chat 页任务栏**：`updateTaskBar(loop)` 根据 `loop.status` 显示/隐藏 `.sb-task-bar`，含截图缩略图全屏 lightbox
 - **自适应轮询**：`setTimeout` 链（非 `setInterval`），`STATE.waiting=true` 时 1 秒，空闲时 3 秒
 - **本地回声去重**：发送时立即追加本地气泡（`data-local-echo` 标记），服务器确认时用 `replaceWith()` 原地替换
 - **isTerminalMsg()**：判断 assistant 消息是否为终态（有正文文本 = 终态；纯 tool_use 或 clawtab_cmd perceive/act = 中间态，不清除 waiting）
 - **marked.js 渲染**：`formatText()` 调用 `marked.parse()` + `sanitizeHtml()`（过滤 script/iframe/事件属性）
 - **标签页状态持久化**：`saveTabState()` / `restoreTabState()` 在 `tab_activated` 消息时触发
 
-### popup.js 五层架构
-1. **I18N 对象** — 顶部定义所有翻译文本（中/英）
-2. **Lang 初始化** — 第一步读 chrome.storage 设置语言
-3. **setStatus(key)** — 唯一设置 statusText 的入口，同步写 `data-i18n`
-4. **render(data)** — 纯函数，state → DOM 映射
-5. **Events** — 事件绑定，实时查找 DOM 元素（不缓存引用）
+### popup.js 五层架构（popup 已不作为主入口，仅保留文件）
+原 popup 的所有功能（连接配置、I18N、导入/导出、配对 UI）已合并到 sidebar.js。
 
 ## 已知坑 & 注意事项
 

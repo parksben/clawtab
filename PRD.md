@@ -51,12 +51,12 @@ Agent 通过聊天会话发送 `clawtab_cmd` JSON 块触发自动化：
 - 返回：browserId、授权状态、是否忙碌、所有标签页列表 + 活跃标签截图
 
 ### F6: 中英文 UI（✅ 已实现）
-- 右上角齿轮菜单切换中 / 英文
-- 所有 UI 文本通过 data-i18n 机制统一管理
+- Config 页顶栏和 Chat 页顶栏各有一个语言切换按钮
+- 两个页面的所有 UI 文本通过 data-i18n 机制统一管理，切换即时生效
 
 ### F7: 配置导入/导出（✅ 已实现）
-- 导出为 `.clawtab` / `.json` 文件
-- 导入后显示配置表单供确认
+- Config 页顶栏提供导出（箭头图标）和导入（复制图标）按钮
+- 导出为 `.json` 文件；导入后自动填充表单并断开当前连接
 
 ### F8: 自动重连（✅ 已实现）
 - 连接断开后自动重连，最多 3 次，指数退避
@@ -68,26 +68,42 @@ Agent 通过聊天会话发送 `clawtab_cmd` JSON 块触发自动化：
 - 内容：`🦾 ClawTab 已连接 · {渠道名称} · N 个标签页`
 - 效果：Web UI 的会话列表中立即出现该 session
 
-### F10: 常驻侧边栏聊天（✅ 已实现）
-- 连接成功后自动打开 Chrome Side Panel（需 Chrome 114+）
-- 侧边栏（`sidebar/`）提供完整聊天 UI：
-  - **Agent 选择器**：下拉切换 agent，每个 agent 独立 session，切换时历史清空
-  - **消息气泡**：用户消息右对齐（紫色），Agent 回复左对齐（白色）
-  - **完整 GFM Markdown 渲染**：通过内置 marked.js（v15.0.12）支持标题、列表、代码块、表格、引用块、链接等
-  - **clawtab_cmd 摘要行**：Agent 浏览器指令渲染为紧凑摘要（Lucide SVG 图标 + 操作描述），不展示原始 JSON
-  - **clawtab_result 隐藏**：内部结果消息不在聊天中显示
-  - **工具调用摘要**：`tool_use` 类型 content block 渲染为摘要行
-  - **思考指示器**：发送消息后显示三点动画，等待 Agent 回复；60 秒安全超时自动解除
-  - **本地回声去重**：发送后立即显示乐观本地气泡，服务器确认时原地替换，无重复
-  - **自适应轮询**：等待 Agent 回复时 1 秒轮询，空闲时 3 秒轮询
-  - **页面元素拾取**：拾取按钮（十字指针图标）激活后可在当前页面选中 DOM 元素，选中的元素作为标签附加到消息
-  - **附件标签**：附加元素显示为可点击的标签（点击后高亮闪烁元素）、可删除；发送时附带 selector + 文本上下文
-  - **标签页状态持久化**：切换浏览器标签页时自动保存/恢复输入框内容和附件列表
-  - **状态徽章**：连接状态（已连接 / 重连中 / 未连接）实时更新
+### F10: 全功能侧边栏（✅ 已实现）
+点击插件图标直接打开 Chrome Side Panel（需 Chrome 114+），**无弹窗**。侧边栏分两个页面：
 
-### F11: 连接后隐藏设置按钮（✅ 已实现）
-- Popup 连接成功状态下，右上角齿轮设置按钮自动隐藏
-- 未连接 / 配对等待状态下正常显示
+**Config 页（连接配置）：**
+- 顶栏：Logo + 品牌名、语言切换按钮、导出/导入配置按钮
+- 表单：Gateway URL、Access Token（密码框+眼睛切换）、渠道名称（含提示文字）
+- 连接按钮：点击后变"连接中…"并禁用，等待 background 回调
+- 配对等待状态：表单区域整体替换为配对码展示（设备 ID 缩略 + CLI 命令 + 复制按钮）
+- 重连失败提示横幅：连接 3 次失败后显示红色错误提示
+- 表单草稿自动保存（600 ms 防抖），下次打开自动填充
+
+**Chat 页（聊天）：**
+- 顶栏：小 logo、Agent 选择下拉、状态徽章（已连接 / 重连中 / 未连接）、语言切换按钮、断连按钮（红色电源图标）
+- 任务状态栏（运行时显示）：任务目标文字 + 当前步骤状态 + 最新截图缩略图（点击全屏） + 取消按钮
+- 消息区：用户消息右对齐（紫色气泡），Agent 回复左对齐（白色气泡）
+- 完整 GFM Markdown 渲染（内置 marked.js v15.0.12）
+- clawtab_cmd 摘要行（Lucide 图标 + 操作描述）；clawtab_result 隐藏
+- 工具调用（tool_use）摘要行；思考指示器（三点动画）；60 秒安全超时
+- 本地回声去重（乐观本地气泡，服务器确认后原地替换）
+- 自适应轮询（等待 Agent 回复时 1 秒，空闲时 3 秒）
+- 元素拾取按钮 + 附件标签（含 selector 上下文，可删除，可高亮闪烁）
+- 标签页状态持久化（切换浏览器标签页时保存/恢复输入框 + 附件）
+- 截图全屏 lightbox
+
+**页面路由逻辑：**
+
+| background 状态 | 显示页面 |
+|-----------------|----------|
+| `pairingPending: true` | Config 页（配对码展示） |
+| `wsConnected: true` | Chat 页 |
+| `gaveUp: true` | Config 页（红色错误提示） |
+| 其他断连状态 | Config 页（表单） |
+
+### F11: 连接成功自动切换（✅ 已实现）
+- background 广播 `status_update(wsConnected:true)` → sidebar 自动切换到 Chat 页
+- 手动点击断连 → `bg('disconnect')` → sidebar 切回 Config 页，不再自动重连
 
 ### F12: 页面元素拾取（✅ 已实现）
 - 侧边栏拾取按钮激活后，content.js 进入高亮拾取模式
@@ -116,12 +132,17 @@ Agent 通过聊天会话发送 `clawtab_cmd` JSON 块触发自动化：
 | 4 | statusText 中英文反转 | ✅ data-i18n 统一机制 |
 | 5 | 工具栏图标显示为 canvas 绘制的"C"而非设计 logo | ✅ idle/connected 状态使用 PNG 文件 |
 | 6 | Web UI 中找不到 clawtab session | ✅ channel 改为 webchat + 握手消息 |
-| 7 | 聊天发送失败（missing scope: operator.read/write） | ✅ signConnect 签名 payload 改为 `clawtab/operator` 模式 |
+| 7 | 聊天发送失败（missing scope: operator.read/write） | ✅ signConnect 签名使用 `openclaw-control-ui`/`webchat` 身份 |
 | 8 | 用户消息发送后出现重复气泡 | ✅ 本地回声去重（data-local-echo + replaceWith） |
 | 9 | 发送后 running 态永远不清除 | ✅ isTerminalMsg() 区分终态 / 中间工具调用 |
 | 10 | 断连后 waiting 锁不释放，输入框无法使用 | ✅ status_update 断连时强制清除 waiting |
 | 11 | 侧边栏消息不支持 Markdown | ✅ 内置 marked.js v15.0.12，完整 GFM 渲染 |
 | 12 | flash_element 动效每次都新建 overlay div | ✅ 改为单例复用，animation:none + offsetWidth 重启动画 |
+| 13 | `client.id='clawtab'` 被 Gateway JSON Schema 拒绝（1008 错误） | ✅ 改用 `openclaw-control-ui`（Gateway 合法值之一） |
+| 14 | `sessions.create` / `chat.send` / `chat.history` Schema 不匹配 | ✅ sessionKey→key，删除 channel，补 idempotencyKey，删除 after 字段 |
+| 15 | 握手消息在每次 Service Worker 重启后重复发送 | ✅ 以 `!S.lastSeenMsgId` 判断新会话，reconnect 时跳过 |
+| 16 | 手动断连后插件自动重连 | ✅ `wsManualDisconnect` 标志持久化到 storage，alarms / init() 均检查 |
+| 17 | sidebar.html pairing 区域误写 `${icon(...)}` 模板字符串 | ✅ 改为 `<svg><use href="#icon-link"></use></svg>` |
 
 ## 技术约束
 

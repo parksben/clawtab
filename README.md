@@ -5,10 +5,13 @@
 ## Features
 
 - **Connect to any OpenClaw Gateway** — local or remote, via WebSocket
-- **Persistent sidebar chat** — a Side Panel opens automatically after connecting; chat with any agent directly from your browser
+- **Sidebar-first UI** — clicking the extension icon opens the sidebar directly; no popup. Connection settings, chat, and agent controls are all in one place
+- **Config page** — fill in Gateway URL, token, and channel name; export/import config; switch language; all without leaving the sidebar
+- **Persistent sidebar chat** — after connecting, the sidebar switches to chat mode automatically
 - **Multi-agent selector** — switch between agents in the sidebar; each agent has its own independent session and chat history
 - **Full Markdown rendering** — agent replies render GFM markdown (headings, lists, code blocks, tables, etc.) via bundled marked.js
 - **Page element picker** — click the crosshair button in the sidebar to pick DOM elements on the current page and attach them to your message
+- **Task status bar** — while an agent task is running, a status bar appears at the top of chat showing the goal, current step, and a live screenshot thumbnail (click to fullscreen)
 - **Tab awareness** — list all open tabs, read page content, and capture screenshots
 - **Task execution engine** — agents issue `perceive` / `act` commands; ClawTab executes and reports results in real time
 - **Exclusive agent lock** — only one agent can occupy the browser at a time; concurrent requests are rejected with a clear reason
@@ -16,7 +19,7 @@
 - **Auto handshake** — ClawTab sends a greeting on connect so the session appears immediately in the OpenClaw Web UI
 - **Auto-save** — URL, token, and channel name are remembered across sessions
 - **Fixed extension ID** — pinned via `manifest.json` key, survives reinstalls
-- **Bilingual UI** — switch between Chinese / English in the popup
+- **Bilingual UI** — switch between Chinese / English in the sidebar (both config and chat pages)
 
 ## Installation
 
@@ -29,10 +32,10 @@ Fixed extension ID: `olfpncdbjlggonplhnlnbhkfianddhmp`
 
 ## Setup
 
-1. Click the ClawTab icon in your toolbar
-2. Fill in **Gateway URL**, **Access Token**, and a **Channel Name** (used as the session identifier in the Web UI)
+1. Click the ClawTab icon in your toolbar — the **sidebar opens directly** (no popup)
+2. On the **Config page**, fill in **Gateway URL**, **Access Token**, and a **Channel Name** (used as the session identifier in the Web UI)
 3. Click **Connect**
-4. The sidebar opens automatically — chat with agents directly from there
+4. The sidebar switches to **Chat mode** automatically — chat with agents directly from there
 5. The session `agent:main:clawtab-{channel}` appears in the OpenClaw Web UI
 
 ## Gateway Configuration
@@ -141,10 +144,13 @@ MIT
 ## 功能特性
 
 - **连接任意 OpenClaw Gateway** — 本地或远程，通过 WebSocket
-- **常驻侧边栏聊天** — 连接后自动打开侧边栏，直接在浏览器中与 Agent 对话
+- **侧边栏优先 UI** — 点击插件图标直接打开侧边栏，无弹窗。连接配置、聊天、Agent 控制全部集中在侧边栏中
+- **Config 页** — 在侧边栏中填写 Gateway URL、Token 和渠道名称；支持导出/导入配置、切换语言
+- **常驻侧边栏聊天** — 连接后侧边栏自动切换到聊天页，直接在浏览器中与 Agent 对话
 - **多 Agent 切换** — 侧边栏支持切换不同 Agent，每个 Agent 维护独立会话和历史记录
 - **完整 Markdown 渲染** — Agent 回复支持完整 GFM markdown（标题、列表、代码块、表格等），通过内置 marked.js 渲染
 - **页面元素拾取** — 点击侧边栏的拾取按钮，可在当前页面选中 DOM 元素并附加到消息中
+- **任务状态栏** — Agent 任务运行时，聊天页顶部显示任务目标、当前步骤及实时截图缩略图（点击可全屏查看）
 - **标签页感知** — 列出所有标签页、读取页面内容、截图
 - **任务执行引擎** — Agent 发送 `perceive` / `act` 指令，ClawTab 执行并实时上报结果
 - **互斥占用锁** — 同一时间只有一个 Agent 可以占用浏览器，并发请求会被直接拒绝并说明原因
@@ -152,7 +158,7 @@ MIT
 - **自动握手** — 连接成功后自动发送握手消息，Web UI 中会话即刻出现
 - **自动保存** — URL、Token、渠道名称在会话间持久保存
 - **固定 Extension ID** — 通过 `manifest.json` key 锁定，重装不变
-- **中英文切换** — popup 右上角一键切换语言
+- **中英文切换** — 侧边栏（Config 页和 Chat 页）均可一键切换语言
 
 ## 安装
 
@@ -165,10 +171,10 @@ MIT
 
 ## 使用
 
-1. 点击工具栏中的 ClawTab 图标
-2. 填写 **Gateway URL**、**Access Token**，以及**渠道名称**（作为 Web UI 中的会话标识）
+1. 点击工具栏中的 ClawTab 图标 — **侧边栏直接打开**（无弹窗）
+2. 在 **Config 页**填写 **Gateway URL**、**Access Token**，以及**渠道名称**（作为 Web UI 中的会话标识）
 3. 点击**保存并连接**
-4. 浏览器右侧自动弹出侧边栏，在侧边栏中直接与 Agent 对话
+4. 侧边栏自动切换到**聊天页**，直接与 Agent 对话
 5. Web UI 中可找到 `agent:main:clawtab-{渠道名称}` 会话
 
 ## Gateway 配置
