@@ -328,9 +328,9 @@ async function wsConnect(url,token,browserId) {
         }
         console.log('[ClawTab] connect ok, payload keys:', Object.keys(msg.payload||{}));
         drawIcon('connected'); broadcastStatus();
-        await ensureSession(); await syncLastSeenId();
+        const isNewSession = await ensureSession(); await syncLastSeenId();
         startPolling(); reportTabs();
-        sendHandshake();
+        if (isNewSession) sendHandshake();
         // 不在连接时自动截图，截图只在任务执行中更新
       } else {
         const code=msg.payload?.code||'';
@@ -409,10 +409,11 @@ function wsScheduleReconnect() {
 // ═══════════════════════════════════════════════════════
 
 async function ensureSession() {
-  try { await wsRequest('sessions.create',{key:S.sessionKey,agentId:'main'},8000); S.sessionExists=true; }
+  try { await wsRequest('sessions.create',{key:S.sessionKey,agentId:'main'},8000); S.sessionExists=true; return true; }
   catch(e) {
-    if(e.code==='SESSION_EXISTS'||e.message?.includes('exists')) { S.sessionExists=true; return; }
+    if(e.code==='SESSION_EXISTS'||e.message?.includes('exists')) { S.sessionExists=true; return false; }
     console.warn('[ClawTab] ensureSession failed (non-fatal):', e.message, '| code:', e.code);
+    return false;
   }
 }
 
