@@ -139,6 +139,14 @@ function msgText(msg) {
   return '';
 }
 
+// Stable identity for dedup: prefer id, fall back to role+content so messages
+// missing a server-side id (e.g. the handshake echo) can't slip past the filter
+// and keep re-rendering on every poll tick.
+function msgKey(m) {
+  if (m.id) return `id:${m.id}`;
+  return `c:${m.role}|${msgText(m).slice(0, 300)}`;
+}
+
 function extractJsonBlock(text) {
   const m = text.match(/```json\s*([\s\S]*?)```/);
   if (!m) return null;
@@ -777,12 +785,17 @@ async function fetchHistory() {
     }
     if (!res.messages?.length) return;
 
-    // Deduplicate: only process messages whose IDs are not already in STATE.messages
-    const seenIds = new Set(STATE.messages.map(m => m.id).filter(Boolean));
+    // Deduplicate by msgKey() — uses id when available, falls back to role+content
+    // so messages without a server-side id (handshake/system echoes) can't keep
+    // re-appearing on every poll tick. Also dedups within the same response.
+    const seenKeys = new Set(STATE.messages.map(msgKey));
     const freshMsgs = [];
     for (const m of res.messages) {
-      STATE.lastMsgId = m.id;
-      if (!seenIds.has(m.id)) freshMsgs.push(m);
+      if (m.id) STATE.lastMsgId = m.id;
+      const key = msgKey(m);
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      freshMsgs.push(m);
     }
     if (!freshMsgs.length) return;
 
