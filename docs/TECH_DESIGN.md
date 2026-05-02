@@ -69,7 +69,53 @@ MV3 Service Worker 是临时进程：
 
 - 内存中的 `STATE.*`、`processedCmds` Set、WebSocket 实例都会被清空。
 - 因此关键进度全部用 `chrome.storage.local` 持久化：`lastSeenMsgId`、`hs_<sessionKey>`（握手已发送标记）、`deviceToken`、配置项等。
-- `sendHandshake()` 必须**先**写 `hs_<sessionKey>` 标志再调用 API，否则 SW 在握手发送中途重启会触发重复握手（这一条同时是 dedup 不可靠时的二级保险，但不能依赖它）。
+
+## 握手只发一次（重要）
+
+握手消息（`🦾 ClawTab 已连接 ...`）通过 `chat.send` 发给 Agent，提示其加载 `clawtab_cmd` 协议。在生产中观察到的"握手被发两次"问题来自三处可被同时触发的副作用，本节明确规定它们的行为，避免再次回归。
+
+### 三层防护
+
+1. **持久化标记 `hs_<sessionKey>` 一旦写入就不撤销。**
+   - 写入时机：`sendHandshake()` 进入 try 之前就 `chrome.storage.local.set({[hsKey]: true})`。
+   - 失败时**不删除**：即使 `wsRequest('chat.send', ...)` 因为 WS 中途掉线、超时而 reject，本地标记保留。原因是 Gateway 可能其实已收到并入库，只是响应丢了；删除标记会让下一次重连再发一遍，触发 Agent 重复回复。
+   - 唯一清除时机：用户切换到不同的 `sessionKey`（换 channel name，标记天然按 key 隔离）。即使是 `isNewSession=true`（Gateway 报告全新会话）也**不**清除 —— 否则 Gateway 端的状态抖动会被放大成用户可见的重复消息。
+
+2. **进程内单飞锁 `_handshakeInFlight`。**
+   - 防止单个 SW 进程内多个 `connect.ok` 处理函数并发触发 `sendHandshake`：典型场景是 WS 掉线后 `wsScheduleReconnect` 与原 connect-ok 的 `await` 链交错。
+   - 进入函数立刻置 `true`，`finally` 重置为 `false`。SW 重启会清空，由第 1 层接力。
+
+3. **进入函数后再读一次 storage 标记。**
+   - 覆盖 SW 重启的那一瞬：旧进程刚把 `hs_*` 写入磁盘但还没发出 `chat.send` 就被杀，新进程启动后又走到 `sendHandshake`。再读一次磁盘标记即可识别"已经在处理中或已发出"，直接返回。
+
+### 调用条件统一
+
+`connect.ok` 处理函数里只有一处发握手的入口：
+
+```js
+const alreadySent = !!(await chrome.storage.local.get([hsKey]))[hsKey];
+if (isNewSession) {
+  S.lastSeenMsgId = null;
+  await chrome.storage.local.remove([`lsid_${S.sessionKey}`]);
+  // 注意：故意不清 hsKey
+}
+if (!alreadySent && !S.lastSeenMsgId) await sendHandshake();
+```
+
+不再像旧版本那样"`isNewSession` 分支无条件重发"，把 Gateway 状态的不确定性挡在客户端这一层。
+
+### 副作用：极端情况下握手可能漏发
+
+如果第一次发送真的失败（例如 Gateway 收到了但 wsRequest 抛错、且 Gateway 也确实没入库），按上述策略我们不会重试，Agent 会缺少协议上下文。这是显式权衡：用户可见的"重复回复"远比"少一次提示"刺眼，且用户可以通过换一个 channel name 重新发起握手。
+
+## 链接打开方式
+
+聊天气泡里的 markdown 链接（裸 URL 或 `[text](url)`）通过两层处理保证"点击 = 在新标签打开"：
+
+1. `sanitizeHtml()` 把所有 `<a>` 强制改写为 `target="_blank" rel="noopener noreferrer"`，并去掉任何已有的 target / rel。
+2. `#messages` 容器上挂一个 click 委托，对 `http(s)://` 链接 `preventDefault` 后调用 `chrome.tabs.create({ url, active: true })`。
+
+只用 `target="_blank"` 在 sidepanel 中并不可靠（部分 Chrome 版本会无声吞掉、或试图把 sidepanel 自身导航走），所以两层都要保留。click 委托的 `preventDefault` 也避免了同时触发"target 跳转 + tabs.create"导致重复打开。
 
 ## UI 约定
 

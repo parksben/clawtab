@@ -59,6 +59,9 @@ const S = {
 
   // Stats
   tabCount: 0, lastCmd: '',
+
+  // Handshake in-flight lock (in-process; persistent flag is hs_<sessionKey> in storage)
+  handshakeInFlight: false,
 };
 
 // ═══════════════════════════════════════════════════════
@@ -326,14 +329,17 @@ async function wsConnect(url,token,browserId) {
         startPolling(); reportTabs();
         const hsKey=`hs_${S.sessionKey}`;
         if (isNewSession) {
-          // Fresh session on the Gateway — clear stale local state and always (re-)send handshake
+          // Gateway thinks the session is fresh — drop our cached lastSeenMsgId
+          // pointer so we don't fast-forward past commands. We deliberately do
+          // NOT clear hsKey: once a handshake has been dispatched for this
+          // sessionKey we never re-send, even if the Gateway's session state
+          // flapped. Clearing it here is what caused the duplicate handshake
+          // bubbles the agent kept replying to.
           S.lastSeenMsgId = null;
-          await chrome.storage.local.remove([`lsid_${S.sessionKey}`, hsKey]);
-          await sendHandshake();
-        } else {
-          const hsFlag=await chrome.storage.local.get([hsKey]);
-          if (!S.lastSeenMsgId && !hsFlag[hsKey]) await sendHandshake();
+          await chrome.storage.local.remove([`lsid_${S.sessionKey}`]);
         }
+        const hsFlag = await chrome.storage.local.get([hsKey]);
+        if (!hsFlag[hsKey] && !S.lastSeenMsgId) await sendHandshake();
         // 不在连接时自动截图，截图只在任务执行中更新
       } else {
         const code=msg.payload?.code||'';
@@ -991,9 +997,17 @@ async function sendResult(result) {
 }
 
 async function sendHandshake() {
+  // Three-layer dedup against duplicate handshakes (see docs/TECH_DESIGN.md):
+  //  1) persistent storage flag (across SW restarts)
+  //  2) in-process in-flight lock (across concurrent connect.ok handlers)
+  //  3) post-set re-check of the storage flag (covers SW-restart races)
+  if (S.handshakeInFlight) return;
+  S.handshakeInFlight = true;
   const hsKey=`hs_${S.sessionKey}`;
-  await chrome.storage.local.set({[hsKey]:true}); // 先持久化标志，防止 SW 重启后重发
   try {
+    const stored = await chrome.storage.local.get([hsKey]);
+    if (stored[hsKey]) return; // already sent (or already attempted) earlier
+    await chrome.storage.local.set({[hsKey]:true}); // mark BEFORE the network call
     const tabs = await chrome.tabs.query({});
     const PROTOCOL_URL = 'https://raw.githubusercontent.com/parksben/clawtab/main/AGENT_PROTOCOL.md';
     const text = [
@@ -1005,10 +1019,17 @@ async function sendHandshake() {
       ``,
       `${PROTOCOL_URL}`,
     ].join('\n');
-    await wsRequest('chat.send', { sessionKey: S.sessionKey, message: text, deliver: true, idempotencyKey: 'hs-' + S.sessionKey }, 8000);
-  } catch(e) {
-    await chrome.storage.local.remove(hsKey); // 发送失败则撤销标志，下次重试
-    console.warn('[ClawTab] handshake failed:', e.message);
+    try {
+      await wsRequest('chat.send', { sessionKey: S.sessionKey, message: text, deliver: true, idempotencyKey: 'hs-' + S.sessionKey }, 8000);
+    } catch(e) {
+      // Intentionally do NOT remove hsKey on error: a WS drop mid-request can
+      // reject our promise even though the Gateway already stored the message.
+      // Removing the flag is what caused the agent to receive (and respond to)
+      // a duplicate handshake on every reconnect.
+      console.warn('[ClawTab] handshake send error (keeping hs flag to avoid dupes):', e.message);
+    }
+  } finally {
+    S.handshakeInFlight = false;
   }
 }
 

@@ -228,7 +228,15 @@ function sanitizeHtml(html) {
     .replace(/<script\b[\s\S]*?<\/script>/gi, '')
     .replace(/<iframe\b[\s\S]*?>/gi, '')
     .replace(/\s+on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*)/gi, '')
-    .replace(/href\s*=\s*["']?\s*javascript:[^"'\s>]*/gi, 'href="#"');
+    .replace(/href\s*=\s*["']?\s*javascript:[^"'\s>]*/gi, 'href="#"')
+    // Force every link to open in a new browser tab. The click delegate on
+    // #messages also calls chrome.tabs.create so this is belt-and-braces.
+    .replace(/<a\b([^>]*)>/gi, (_, attrs) => {
+      const stripped = attrs
+        .replace(/\s+target\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, '')
+        .replace(/\s+rel\s*=\s*(?:"[^"]*"|'[^']*'|\S+)/gi, '');
+      return `<a${stripped} target="_blank" rel="noopener noreferrer">`;
+    });
 }
 
 function formatText(raw) {
@@ -1193,6 +1201,20 @@ document.getElementById('taskThumb').addEventListener('click', () => {
 // Lightbox dismiss
 document.getElementById('lightbox').addEventListener('click', () => {
   document.getElementById('lightbox').style.display = 'none';
+});
+
+// Open chat-bubble links in a new browser tab. The sidepanel itself is too
+// small to host arbitrary URLs and target="_blank" alone is unreliable here,
+// so go through chrome.tabs.create.
+document.getElementById('messages').addEventListener('click', (e) => {
+  const a = e.target.closest('a[href]');
+  if (!a) return;
+  const href = a.getAttribute('href');
+  if (!href || !/^https?:\/\//i.test(href)) return;
+  e.preventDefault();
+  chrome.tabs.create({ url: href, active: true }).catch(() => {
+    window.open(href, '_blank', 'noopener,noreferrer');
+  });
 });
 
 // ── Background messages ──
