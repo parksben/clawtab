@@ -157,6 +157,11 @@ export interface ClawtabResult {
 // `provenance.kind === "inter_session"` marks user messages that were echoed
 // back from another session via the agent's `sessions_send` tool. These are
 // internal command bounces and must not render in the chat list.
+//
+// `__openclaw.id` is the gateway's internal stable id. Some chat.history
+// payloads omit the top-level `id` and only carry it inside `__openclaw`, so
+// any code that needs a stable identifier (msgKey / lastSeenMsgId tracking)
+// must fall back to `m.__openclaw?.id` when `m.id` is missing.
 export interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant' | 'system' | 'toolResult' | string;
@@ -171,5 +176,9 @@ export interface ChatMessage {
     sourceSessionKey?: string;
     sourceChannel?: string;
     sourceTool?: string;
+  };
+  __openclaw?: {
+    id?: string;
+    seq?: number;
   };
 }

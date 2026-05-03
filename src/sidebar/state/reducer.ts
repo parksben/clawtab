@@ -293,7 +293,8 @@ export function reducer(state: SidebarStateShape, action: Action): SidebarStateS
       const fresh: ChatMessage[] = [];
       let newLast = state.lastMsgId;
       for (const m of visible) {
-        if (m.id) newLast = m.id;
+        const stableId = m.id || m.__openclaw?.id;
+        if (stableId) newLast = stableId;
         const k = msgKey(m);
         // Drop messages the user explicitly cleared via "new conversation".
         // The gateway keeps these in chat.history across `/new`, so without

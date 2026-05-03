@@ -39,7 +39,16 @@ describe('msgKey', () => {
   it('prefers id when present', () => {
     expect(msgKey({ id: 'abc', role: 'user', content: 'hello' })).toBe('id:abc');
   });
-  it('falls back to role+content hash when id missing', () => {
+  it('falls back to __openclaw.id when top-level id is absent (gateway shape)', () => {
+    expect(
+      msgKey({
+        role: 'assistant',
+        content: 'hi',
+        __openclaw: { id: 'd8556319', seq: 3 },
+      }),
+    ).toBe('id:d8556319');
+  });
+  it('falls back to role+content hash when both ids missing', () => {
     expect(msgKey({ role: 'user', content: 'hello' })).toBe('c:user|hello');
   });
   it('truncates content beyond 300 chars (handshake echoes are long)', () => {

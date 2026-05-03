@@ -30,7 +30,12 @@ export function msgText(msg: ChatMessage): string {
 }
 
 export function msgKey(m: ChatMessage): string {
-  if (m.id) return `id:${m.id}`;
+  // Prefer the top-level id; fall back to the gateway's internal id at
+  // `__openclaw.id`. Without the fallback, chat.history payloads that omit
+  // the top-level id (most of them) collapse to a content-only key and
+  // dedup gets fuzzy across messages whose content collides.
+  const stableId = m.id || m.__openclaw?.id;
+  if (stableId) return `id:${stableId}`;
   return `c:${m.role}|${msgText(m).slice(0, 300)}`;
 }
 

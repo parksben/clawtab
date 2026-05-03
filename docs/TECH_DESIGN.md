@@ -264,6 +264,21 @@ Gateway 把 `/new` 当 agent 维度的"重置记忆"指令，**不会**因此从
 
 实现细节：把 `waitingTimerRef` 的启动 / 清除收敛到 App.tsx 的一个 effect 里，依赖 `state.waiting`、`state.messages.length`、`state.loop?.status`。任一变化都重新评估：waiting 为 false 就 clear，否则重启 60s 倒计时。
 
+### Background 解析 chat.history 的三种 content 形态（重要）
+
+历史 bug：background 的 `doPoll` 在提取 assistant 消息文本时只处理 `content: string` 和 `m.blocks`，没处理 `content: Array<{type,text}>`。Gateway 返回的实际形态恰恰主要是数组——所以 `clawtab_cmd` JSON 块永远 match 不到，**整个 perceive / act 链路从未在生产中跑通过**。导出的 chat 日志里清一色是 agent 发的 `clawtab_cmd` 但没有任何对应的 `clawtab_result`。
+
+修复：抽两个共享 helper 在 background 顶部：
+
+- `pickMsgText(m)`：依次尝试 `content` string → `content` array 的 text 块拼接 → `blocks` array 的 text 块拼接 → ""。
+- `pickMsgId(m)`：`m.id || m.__openclaw?.id`。
+
+为什么 `__openclaw.id` 必须兜底：Gateway 的 `chat.history` payload 经常省略顶层 `id`，把稳定 id 只放在 `__openclaw.id` 里。原来 `lastSeenMsgId = m.id` 这一句永远是 undefined → polling watermark 永远不前进 → 每次 polling 都从头扫一遍，要么 fast-forward 跳过新 cmd，要么重复处理（被 `processedCmds` set 兜住，但还是浪费）。
+
+`pickMsgText` / `pickMsgId` 在 sidebar 也有平行版本：`msgText` 已经覆盖三种形态，`msgKey` 现在也按同样规则用 `__openclaw.id` 兜底。
+
+防回归：`doPoll` 里加了一行 diag log，当 assistant 消息提取出空 text 时会打 `doPoll: assistant msg has no text` + content shape 摘要，导出诊断日志一眼就能看出新出现的 content 形态。
+
 ## 链接打开方式
 
 聊天气泡里的 markdown 链接（裸 URL 或 `[text](url)`）通过两层处理保证"点击 = 在新标签打开"：

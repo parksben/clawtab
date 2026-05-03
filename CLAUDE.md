@@ -93,6 +93,10 @@ These are paid-for in production. Before touching the relevant code, re-read the
 
 16. **60s "did not respond" timer is reset on activity, not on send** — `App.tsx` owns a single effect keyed on `[state.waiting, state.messages.length, state.loop?.status]`. Any new visible message OR loop transition (perceiving / thinking / acting) clears + restarts the 60s. Terminal message → reducer flips `waiting=false` → effect tears it down. The earlier "set timer at send time, never reset" version fired a false "Agent did not respond" mid-perceive because intermediate `clawtab_cmd` JSON blocks have no terminal text.
 
+17. **Background's `doPoll` must handle three `content` shapes** — Gateway's `chat.history` returns assistant messages as one of: `content: string`, `content: [{type:"text",text}, ...]`, or top-level `blocks: [...]`. Use the shared `pickMsgText(m)` helper at the top of [src/background/index.ts](src/background/index.ts) — it covers all three. The historical bug was looking only at `string` and `blocks`, missing the dominant array form, so `clawtab_cmd` JSON blocks were never parsed and `perceive` / `act` never ran in production. There's now a `doPoll: assistant msg has no text` diag log that fires when extraction yields "" — keep it; it's the canary for new content shapes the gateway might add.
+
+18. **Stable msg id is `m.id || m.__openclaw?.id`** — `chat.history` payloads often omit the top-level `id` and only carry the gateway's id at `m.__openclaw.id`. Background uses `pickMsgId(m)` for `lastSeenMsgId`; sidebar's `msgKey()` falls back to the same. Without this, the polling watermark never advances and dedup degrades to content-only.
+
 ## UI Conventions
 
 - **Two pages**: Config and Chat, derived from the reducer's `state.page` field (driven by `status_update` broadcasts).

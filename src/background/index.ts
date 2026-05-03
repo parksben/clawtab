@@ -943,7 +943,7 @@ async function syncLastSeenId(): Promise<void> {
     );
     const msgs = res.messages || [];
     if (msgs.length > 0) {
-      S.lastSeenMsgId = msgs[msgs.length - 1].id || null;
+      S.lastSeenMsgId = pickMsgId(msgs[msgs.length - 1]) || null;
       await saveLastSeenId();
     }
   } catch (e) {
@@ -973,6 +973,38 @@ function schedulePoll(ms: number): void {
   S.pollTimer = setTimeout(doPoll, ms);
 }
 
+// Extract a message's stable id. Some `chat.history` payloads keep the id only
+// inside `__openclaw.id` and leave the top-level `id` missing — falling back to
+// it lets `lastSeenMsgId` track the watermark correctly. Without this, polling
+// either fast-forwards past commands or replays the entire history every tick.
+function pickMsgId(m: ChatMessage): string | undefined {
+  return m.id || m.__openclaw?.id;
+}
+
+// Concatenate all text blocks from a chat message. Gateway returns three
+// shapes: `content: string`, `content: [{type:"text",text}, ...]`, and
+// `blocks: [{type:"text",text}, ...]`. The historical bug here was looking
+// only at `string` and `blocks`, never the `content` array — which is the
+// dominant shape — so `clawtab_cmd` blocks embedded in array-form messages
+// were never picked up by the polling loop and `perceive` never ran.
+function pickMsgText(m: ChatMessage): string {
+  const c = m.content;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) {
+    return c
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text || '')
+      .join('');
+  }
+  if (Array.isArray(m.blocks)) {
+    return m.blocks
+      .filter((b) => b.type === 'text')
+      .map((b) => b.text || '')
+      .join('');
+  }
+  return '';
+}
+
 async function doPoll(): Promise<void> {
   if (!S.wsConnected || S.pollPaused) return;
   try {
@@ -984,7 +1016,7 @@ async function doPoll(): Promise<void> {
     S.pollBackoff = POLL_IDLE_MS;
     const allMsgs = res.messages || [];
     const seenIdx = S.lastSeenMsgId
-      ? allMsgs.findIndex((m) => m.id === S.lastSeenMsgId)
+      ? allMsgs.findIndex((m) => pickMsgId(m) === S.lastSeenMsgId)
       : -1;
     if (seenIdx === -1 && S.lastSeenMsgId) {
       logEvent('warn', 'bg', 'doPoll: lastSeenMsgId slid out of window, fast-forwarding', {
@@ -992,7 +1024,7 @@ async function doPoll(): Promise<void> {
         windowSize: allMsgs.length,
       });
       if (allMsgs.length > 0) {
-        S.lastSeenMsgId = allMsgs[allMsgs.length - 1].id || null;
+        S.lastSeenMsgId = pickMsgId(allMsgs[allMsgs.length - 1]) || null;
         await saveLastSeenId();
       }
       schedulePoll(S.pollInterval);
@@ -1000,13 +1032,25 @@ async function doPoll(): Promise<void> {
     }
     const newMsgs = seenIdx >= 0 ? allMsgs.slice(seenIdx + 1) : allMsgs;
     for (const msg of newMsgs) {
-      S.lastSeenMsgId = msg.id || S.lastSeenMsgId;
+      const msgId = pickMsgId(msg);
+      S.lastSeenMsgId = msgId || S.lastSeenMsgId;
       await saveLastSeenId();
       if (msg.role !== 'assistant') continue;
-      const text =
-        typeof msg.content === 'string'
-          ? msg.content
-          : msg.blocks?.find((b) => b.type === 'text')?.text || '';
+      const text = pickMsgText(msg);
+      if (!text) {
+        // Diagnostic: an assistant msg with no extractable text usually means
+        // the gateway is using a content shape we don't handle. The historical
+        // bug here was content:[{type:"text",text:...}] silently producing "".
+        logEvent('info', 'bg', 'doPoll: assistant msg has no text', {
+          msgId,
+          contentKind: typeof msg.content,
+          contentArrayLen: Array.isArray(msg.content) ? msg.content.length : null,
+          blockTypes: Array.isArray(msg.content)
+            ? (msg.content as Array<{ type: string }>).map((b) => b.type).slice(0, 6)
+            : null,
+        });
+        continue;
+      }
       const match = text.match(/```json\s*([\s\S]*?)```/);
       if (!match) continue;
       let parsed: unknown;
@@ -1014,7 +1058,7 @@ async function doPoll(): Promise<void> {
         parsed = JSON.parse(match[1]);
       } catch (e) {
         logEvent('warn', 'bg', 'clawtab_cmd JSON parse failed', {
-          msgId: msg.id,
+          msgId,
           error: (e as Error).message,
           snippet: match[1]?.slice(0, 200),
         });
