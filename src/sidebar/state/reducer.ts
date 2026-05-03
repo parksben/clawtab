@@ -501,14 +501,13 @@ export function selectVisibleMessages(state: SidebarStateShape): ChatMessage[] {
     if (isToolResultMsg(m)) return false;
     if (isInterSessionEcho(m)) return false;
     const text = msgText(m);
-    const jsonMatch = text.match(/```json\s*([\s\S]*?)```/);
-    if (jsonMatch) {
-      try {
-        const j = JSON.parse(jsonMatch[1]) as { type?: string };
-        if (j.type === 'clawtab_result') return false;
-      } catch {
-        /* ignore — keep message */
-      }
+    // Clawtab_result detection via regex rather than JSON.parse — the
+    // gateway truncates long payloads (base64 screenshots hit ~12KB cutoff)
+    // and JSON.parse fails, bypassing the filter. The result was users
+    // seeing 12KB base64 blobs rendered into the chat. Matching the type
+    // token inside a ```json fence survives truncation.
+    if (/```json\s*[\s\S]*?"type"\s*:\s*"clawtab_result"/.test(text)) {
+      return false;
     }
     if (text.trim()) return true;
     const blocks = Array.isArray(m.content)

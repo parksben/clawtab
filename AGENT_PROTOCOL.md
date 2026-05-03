@@ -100,6 +100,8 @@ Captures the active tab's DOM structure and a JPEG screenshot.
 | `op` | string | Operation type (see table below) |
 | `target` | string | CSS selector, element text, or x/dx/tabId depending on op |
 | `value` | string | URL, fill value, attribute name, key name, or y/dy depending on op |
+| `fields` | object | Batch field map for `op: "fill_form"` — `{ selector: value, ... }` |
+| `pierceShadow` | boolean | Pierce open shadow roots when resolving selectors (default `false`). Applies to `click`, `fill`, `clear`, `get_text`, `hover`, `scroll_to_element`. |
 | `tabId` | number | Target tab ID (defaults to active tab) |
 | `captureAfter` | boolean | Take a screenshot after the operation |
 | `waitAfter` | number | Milliseconds to wait after the operation |
@@ -110,24 +112,29 @@ Captures the active tab's DOM structure and a JPEG screenshot.
 | op | `target` | `value` | description |
 |---|---|---|---|
 | `navigate` | — | URL | Navigate active tab to URL |
-| `click` | CSS selector or visible text | — | Click an element |
-| `fill` | CSS selector | text to type | Type into input field |
-| `clear` | CSS selector | — | Clear input field |
-| `press` | — | key name (e.g. `Enter`) | Dispatch keyboard event on focused element |
+| `click` | CSS selector or visible text | — | Click an element (supports `pierceShadow`) |
+| `fill` | CSS selector | text to type | Type into input field (supports `pierceShadow`) |
+| `fill_form` | — | — | Batch fill — reads `payload.fields` `{selector:value,...}` (supports `pierceShadow`) |
+| `clear` | CSS selector | — | Clear input field (supports `pierceShadow`) |
+| `press` | — | key name or combo | Dispatch keyboard event. Supports modifier combos: `"ctrl+a"`, `"meta+shift+k"`, `"alt+Tab"`. Applies to `document.activeElement`. |
 | `select` | CSS selector | option value | Choose a `<select>` option |
-| `hover` | CSS selector | — | Mouse over element |
+| `hover` | CSS selector | — | Mouse over element (supports `pierceShadow`) |
 | `scroll` | x (px) | y (px) | Scroll to absolute coordinates |
 | `scroll_by` | dx (px) | dy (px) | Scroll by relative offset |
-| `scroll_to_element` | CSS selector | — | Scroll element into view |
+| `scroll_to_element` | CSS selector | — | Scroll element into view (supports `pierceShadow`) |
 | `wait` | — | ms | Pause |
 | `wait_for` | CSS selector | — | Wait up to timeout for element to appear |
-| `get_text` | CSS selector | — | Read element's text content |
+| `wait_for_url` | URL pattern | timeout ms | Wait until the active tab URL matches `target`. Pattern accepts `*` (segment wildcard) and `**` (multi-segment wildcard). |
+| `get_text` | CSS selector | — | Read element's text content (supports `pierceShadow`) |
 | `get_attr` | CSS selector | attribute name | Read an element attribute |
+| `get_all_links` | selector filter (optional) | max count (default 500) | Return `[{href, text, title, visible}, ...]` for all matching `<a>` |
+| `get_article_text` | — | max chars (default 20000) | Heuristic extraction of main article content (`<article>` / `<main>` / densest paragraph container). Returns `{title, url, text, truncated}` |
 | `eval` | — | JavaScript code | Execute arbitrary script; returns result |
 | `screenshot_element` | CSS selector | — | Capture element as JPEG |
 | `new_tab` | — | URL (optional) | Open a new tab |
 | `close_tab` | tabId | — | Close a tab |
-| `switch_tab` | tabId | — | Switch to a tab |
+| `switch_tab` | tabId or URL/title substring | — | Switch to a tab |
+| `list_tabs` | — | — | Return `[{id, windowId, url, title, active, pinned, audible, muted, favIconUrl}, ...]` for every open tab |
 | `go_back` | — | — | Browser back |
 | `go_forward` | — | — | Browser forward |
 
@@ -197,6 +204,36 @@ Updates the ClawTab toolbar icon to "thinking" state and records the task goal.
   "type": "clawtab_cmd",
   "cmdId": "cancel-001",
   "action": "cancel"
+}
+```
+
+---
+
+### `capabilities` — Self-describe
+
+Returns the extension's current capability surface — useful when an agent wants to discover available ops without parsing this document. Versions of ClawTab that post-date a capability addition will list it here; older versions will omit it, so callers should treat the response as authoritative.
+
+```json
+{
+  "type": "clawtab_cmd",
+  "cmdId": "caps-001",
+  "action": "capabilities"
+}
+```
+
+**Result `data`:**
+```json
+{
+  "version": "3.x.x",
+  "protocolVersion": 1,
+  "actions": ["perceive", "act", "task_start", "task_done", "task_fail", "cancel", "capabilities"],
+  "ops": ["click", "fill", "fill_form", "clear", "navigate", "scroll", "scroll_by", "scroll_to_element", "press", "select", "hover", "wait", "wait_for", "wait_for_url", "get_text", "get_attr", "get_all_links", "get_article_text", "new_tab", "close_tab", "switch_tab", "list_tabs", "go_back", "go_forward", "screenshot_element", "eval"],
+  "flags": {
+    "pierceShadow": "click/fill/clear/get_text/hover/scroll_to_element",
+    "fillBatchField": "fill_form",
+    "pressModifiers": "press (e.g. \"ctrl+a\", \"meta+shift+k\")"
+  },
+  "browser": { "browserId": "my-channel", "tabCount": 11 }
 }
 ```
 

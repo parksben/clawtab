@@ -55,7 +55,7 @@ User fills config (URL, Token, Channel)
 
 ### Command Execution
 
-The background polls `chat.history` for assistant messages containing a `clawtab_cmd` JSON block. Supported actions: `perceive` (DOM + JPEG screenshot), `act` (20+ browser ops), `task_start`, `task_done`, `task_fail`, `cancel`. Results go back as `clawtab_result` blocks (filtered out of the chat UI). An exclusive lock ensures only one agent can execute `act`/`perceive` at a time; others receive `BUSY`.
+The background polls `chat.history` for assistant messages containing a `clawtab_cmd` JSON block. Supported actions: `perceive` (DOM + JPEG screenshot), `act` (25+ browser ops incl. `fill_form`, `list_tabs`, `wait_for_url`, `get_all_links`, `get_article_text`), `task_start`, `task_done`, `task_fail`, `cancel`, `capabilities` (self-describe). Results go back as `clawtab_result` blocks (filtered out of the chat UI). An exclusive lock ensures only one agent can execute `act`/`perceive` at a time; others receive `BUSY`. Selector-based ops accept `pierceShadow: true` to traverse open shadow roots; `press` accepts modifier combos like `"ctrl+a"` / `"meta+shift+k"`.
 
 ## Key Pitfalls (load-bearing — do not regress)
 
@@ -96,6 +96,16 @@ These are paid-for in production. Before touching the relevant code, re-read the
 17. **Background's `doPoll` must handle three `content` shapes** — Gateway's `chat.history` returns assistant messages as one of: `content: string`, `content: [{type:"text",text}, ...]`, or top-level `blocks: [...]`. Use the shared `pickMsgText(m)` helper at the top of [src/background/index.ts](src/background/index.ts) — it covers all three. The historical bug was looking only at `string` and `blocks`, missing the dominant array form, so `clawtab_cmd` JSON blocks were never parsed and `perceive` / `act` never ran in production. There's now a `doPoll: assistant msg has no text` diag log that fires when extraction yields "" — keep it; it's the canary for new content shapes the gateway might add.
 
 18. **Stable msg id is `m.id || m.__openclaw?.id`** — `chat.history` payloads often omit the top-level `id` and only carry the gateway's id at `m.__openclaw.id`. Background uses `pickMsgId(m)` for `lastSeenMsgId`; sidebar's `msgKey()` falls back to the same. Without this, the polling watermark never advances and dedup degrades to content-only.
+
+19. **`processedCmds` must persist** — The cmd-id dedup set sits in `chrome.storage.local['processed_cmds']` (debounced 250 ms; restored in `init()` via `loadProcessedCmds()`). MV3 SW is killed after ~30s idle and restarted on next event; an in-memory-only set would let every old `clawtab_cmd` in `chat.history` re-execute after each restart, capturing whatever tab is active at restart time. Users see this as "tab switches keep re-sending screenshots to the agent" — that's the tell.
+
+20. **Clawtab_result filter must NOT rely on `JSON.parse`** — The gateway truncates `chat.history` messages around 12KB; perceive results with base64 screenshots cross this limit. `JSON.parse(jsonMatch[1])` throws on truncated input, the catch silently swallows, the filter fails closed → 12KB of base64 renders into the chat. `selectVisibleMessages` detects the `"type":"clawtab_result"` token via regex instead. The test "filters TRUNCATED clawtab_result blocks" pins this.
+
+21. **No auto-side-effects on `chrome.tabs.onActivated`** — The listener only broadcasts `tab_activated` (so sidebar can save its draft) and clears pick-mode. NO screenshots, NO perceive, NO agent traffic. Auto-snapshots eat the 1-per-second `captureVisibleTab` rate limit and make users think the extension is "talking to the agent" whenever they switch tabs. Screenshots happen only during agent-issued perceive/act commands, or when the DEV test panel is exercised.
+
+22. **DEV test panel is Vite-DEV-only** — `ChatPage` mounts `<DevPanel>` only when `import.meta.env.DEV === true`. The DevPanel uses three bypass bg messages (`dev_run_act` / `dev_run_perceive` / `dev_capabilities`) that call `executeAct` / `extractDOM` directly without going through `chat.send` — so test traffic never hits `chat.history` and won't be replayed. `pnpm build` strips the panel out. If you need the panel in a built extension, either add a storage-keyed toggle or run `pnpm dev` against a loaded-unpacked `dist/`.
+
+23. **New ops must update `executeAct` switch, `describeOp` labels, AND `handleCapabilities`** — Adding a branch to `executeAct` alone is not enough: `describeOp` gives the user-visible "Doing X…" status text (missing branch → "undefined"), and `handleCapabilities` is what agents query to discover features (missing entry → agent never uses the new op). The protocol.ts `ActOp` union is the type-safety anchor — TS will flag a missing branch in `describeOp` / capabilities list if the type is exhaustive, but `executeAct` uses `switch (op)` on a plain string so it won't.
 
 ## UI Conventions
 

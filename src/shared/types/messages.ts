@@ -62,6 +62,23 @@ export type EnterPickModeRequest = { type: 'enter_pick_mode' };
 export type ExitPickModeRequest = { type: 'exit_pick_mode' };
 export type FlashElementRequest = { type: 'flash_element'; selector: string };
 
+// Dev-panel bypass handlers — skip the chat.history round-trip so the session
+// isn't polluted with test noise. Sidebar gates these behind `import.meta.env.DEV`.
+export type DevRunActRequest = {
+  type: 'dev_run_act';
+  op: string;
+  target?: string | number;
+  value?: string | number;
+  fields?: Record<string, string>;
+  pierceShadow?: boolean;
+  captureAfter?: boolean;
+};
+export type DevRunPerceiveRequest = {
+  type: 'dev_run_perceive';
+  include?: Array<'screenshot' | 'title' | 'url' | 'dom' | 'scroll_position' | 'all'>;
+};
+export type DevCapabilitiesRequest = { type: 'dev_capabilities' };
+
 // ── 2) Background → Sidebar (broadcasts) ─────────────────────────────────────
 
 export type StatusUpdateBroadcast = {
@@ -122,7 +139,10 @@ export type SidebarToBackgroundMessage =
   | LogClearRequest
   | EnterPickModeRequest
   | ExitPickModeRequest
-  | FlashElementRequest;
+  | FlashElementRequest
+  | DevRunActRequest
+  | DevRunPerceiveRequest
+  | DevCapabilitiesRequest;
 
 export type BackgroundBroadcast =
   | StatusUpdateBroadcast

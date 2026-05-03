@@ -333,6 +333,22 @@ describe('selectVisibleMessages', () => {
     expect(v).toHaveLength(1);
     expect(v[0].id).toBe('2');
   });
+  it('filters TRUNCATED clawtab_result blocks (gateway 12KB cap)', () => {
+    // When perceive results carry a base64 screenshot, the gateway truncates
+    // the JSON payload mid-string. JSON.parse fails, but the `"type":"clawtab_result"`
+    // token is still present near the top. Regex-based detection survives.
+    const truncated =
+      '```json\n{"type":"clawtab_result","cmdId":"perceive-008","ok":true,"data":{"screenshot":"data:image/jpeg;base64,/9j/4AAQSkZJRg' +
+      'A'.repeat(8000) +
+      '...(truncated)...';
+    const v = selectVisibleMessages(
+      mkState([
+        { id: '1', role: 'user', content: truncated },
+        { id: '2', role: 'assistant', content: 'ok' },
+      ]),
+    );
+    expect(v.map((x) => x.id)).toEqual(['2']);
+  });
   it('keeps clawtab_cmd (rendered as icon rows)', () => {
     const v = selectVisibleMessages(
       mkState([

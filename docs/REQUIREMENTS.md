@@ -42,9 +42,26 @@
 - **"未响应"提示重置规则**：发出消息后若长时间没看到 agent 任何活动，UI 在底部显示一行红色提示。计时**不是"自发送起 60 秒"**，而是"自最近一次活动起 60 秒"——只要观察到 agent 仍在 perceive / act / 发新消息，超时就被推迟。这避免长任务（多步页面感知）刚开始就被误判为"agent 没响应"。
 
 ### 任务执行
-- Agent 可触发 `perceive` / `act` / `task_start` / `task_done` / `task_fail` / `cancel` 等命令。
+- Agent 可触发 `perceive` / `act` / `task_start` / `task_done` / `task_fail` / `cancel` / `capabilities` 等命令。
+- `capabilities` 命令让 agent 在会话中自查当前支持的 action / op / flag，不再需要读静态文档。
 - 同一时间只允许一个 Agent 执行 `act` / `perceive`，其他请求会收到 `BUSY`。
 - 任务进行中顶部任务栏显示状态（perceiving / thinking / acting / done / failed / cancelled）以及最近一次截图。
+- **切换标签页不会触发任何面向 agent 的副作用**——不自动截图、不自动感知，只有 agent 明确下 `perceive` / `act` 命令、或用户在 DEV 面板里点按钮，才会调用 `chrome.tabs.captureVisibleTab`。
+
+### 浏览器自动化工具面
+- 批量表单填写 `fill_form` — 登录 / checkout 一次性灌 N 个字段。
+- 多标签管理 `list_tabs` — 返回所有打开 tab 的 `{id, url, title, active, pinned, audible, muted, favIconUrl}`。
+- URL 等待 `wait_for_url` — 点击后等跳转到指定 URL 模式（支持 `*` / `**` 通配）。
+- 链接全量 `get_all_links` — 不受 `perceive.dom.interactive` 的 50 条上限，用于搜索结果 / 长文导航。
+- 正文提取 `get_article_text` — 启发式读文章正文（`<article>` / `<main>` / 段落最密 section），纯文本输出。
+- 快捷键组合 `press` — 支持 `ctrl+a` / `meta+shift+k` / `alt+Tab` 等修饰键组合。
+- Shadow DOM 穿透 `pierceShadow: true` — `click` / `fill` / `clear` / `get_text` / `hover` / `scroll_to_element` 在遇到 `shadowRoot` 时递归查找。
+
+### DEV 测试面板
+- 仅在 `pnpm dev` 跑出来的开发构建里可见（生产 build 会被 tree-shake 掉）。
+- 聊天页 TaskBar 下面一个折叠块，默认收起；展开后每个 op 一个按钮，按分组（meta / perceive / tabs / content / navigation / input / eval）列出。
+- 点一下按钮就在当前 active tab 上执行，不经过 `chat.history`——测试调用不污染会话上下文。
+- 结果区显示 ok/error + 耗时 + 截断到 3.5KB 的 JSON；若结果含 `data:image/...` 会自动渲染成缩略图。
 
 ### 双语 & 元素拾取
 - 支持中英文切换（侧边栏左上角切语言按钮），偏好持久化。

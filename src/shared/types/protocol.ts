@@ -8,7 +8,8 @@ export type ClawtabCmdAction =
   | 'task_start'
   | 'task_done'
   | 'task_fail'
-  | 'cancel';
+  | 'cancel'
+  | 'capabilities';
 
 export type PerceiveInclude =
   | 'screenshot'
@@ -26,6 +27,7 @@ export interface PerceivePayload {
 export type ActOp =
   | 'click'
   | 'fill'
+  | 'fill_form'
   | 'clear'
   | 'navigate'
   | 'scroll'
@@ -36,11 +38,15 @@ export type ActOp =
   | 'hover'
   | 'wait'
   | 'wait_for'
+  | 'wait_for_url'
   | 'get_text'
   | 'get_attribute'
+  | 'get_all_links'
+  | 'get_article_text'
   | 'new_tab'
   | 'close_tab'
   | 'switch_tab'
+  | 'list_tabs'
   | 'go_back'
   | 'go_forward'
   | 'screenshot_element'
@@ -51,6 +57,17 @@ export interface ActPayload {
   op: ActOp;
   target?: string | number;
   value?: string | number;
+  /**
+   * Batch field map for `op: "fill_form"`. Map from selector to value.
+   * Example: `{ "#username": "alice", "input[name=pw]": "secret" }`.
+   */
+  fields?: Record<string, string>;
+  /**
+   * When true, the DOM query function pierces open shadow roots when
+   * resolving selectors. Defaults to false (host document only). Applies to
+   * `click`, `fill`, `clear`, `get_text`, `hover`, `scroll_to_element`.
+   */
+  pierceShadow?: boolean;
   waitAfter?: number;
   captureAfter?: boolean;
   timeout?: number;
@@ -122,6 +139,15 @@ export type ClawtabCmd =
       cmdId: string;
       agentId?: string;
       action: 'cancel';
+      payload?: Record<string, unknown>;
+      issuedAt?: number;
+      timeout?: number;
+    }
+  | {
+      type: 'clawtab_cmd';
+      cmdId: string;
+      agentId?: string;
+      action: 'capabilities';
       payload?: Record<string, unknown>;
       issuedAt?: number;
       timeout?: number;

@@ -279,6 +279,52 @@ Gateway 把 `/new` 当 agent 维度的"重置记忆"指令，**不会**因此从
 
 防回归：`doPoll` 里加了一行 diag log，当 assistant 消息提取出空 text 时会打 `doPoll: assistant msg has no text` + content shape 摘要，导出诊断日志一眼就能看出新出现的 content 形态。
 
+### processedCmds 必须持久化（重要）
+
+原始实现里 `S.loop.processedCmds: Set<string>` 只在内存里。Chrome MV3 SW 默认 30s 无活动就被杀，下次 polling 拉到 chat.history 时 `processedCmds` 是空集，老 `clawtab_cmd` 又重新跑一遍——**每次重放都在当前 active tab 上 `captureVisibleTab`**，用户眼里看到的是"每切换一次 tab 都自动重新给 agent 发截图"。
+
+修复：把 `processedCmds` 序列化成数组写到 `chrome.storage.local['processed_cmds']`（debounced 250ms），`init()` 里 `loadProcessedCmds()` 恢复。保留 300 条上限按 ring buffer 滚动。
+
+组合效果：watermark (`lastSeenMsgId`) + dedup set (`processedCmds`) 双重持久化后，SW 休眠/重启不会再回放历史 cmd，跨会话 / 跨 Chrome 重启也同样稳定。
+
+### `clawtab_result` 过滤：不能依赖 `JSON.parse` 成功（重要）
+
+Gateway 对 `chat.history` 返回的消息做了 ~12KB 截断；感知截图是 JPEG base64，轻松超限。sidebar 原来的过滤代码 `JSON.parse(jsonMatch[1]).type === 'clawtab_result'` 在截断 payload 上抛错，catch 吞掉，消息 "keep"——于是 base64 全文直接灌进聊天列表。
+
+修复：过滤改用 **正则** `"type"\s*:\s*"clawtab_result"`，不依赖 payload 完整性。测试 `"filters TRUNCATED clawtab_result blocks"` 锁住这一路径。
+
+### Tab 切换不做任何"副作用"（用户要求）
+
+历史实现：`chrome.tabs.onActivated` 里调 `captureQuickSnapshot()` 更新 TaskBar 缩略图。问题：
+1. 每次切 tab 消耗一次 `chrome.tabs.captureVisibleTab` 配额（1/秒），后续合法 perceive 容易 rate-limit；
+2. 用户感觉"切 tab 就有东西在后台动"，不直观。
+
+修复：onActivated 只发 `tab_activated` 广播（供 sidebar 保存 draft）+ 清掉 pick mode，不再自动截图。截图只在 agent 明确要求（perceive/act captureAfter）或 DEV 测试面板点按钮时才发生。
+
+### Dev 测试面板
+
+`import.meta.env.DEV === true` 时，`ChatPage` 顶部显示一个 `DevPanel`（`src/sidebar/components/DevPanel.tsx`），每个 op 一个按钮 + 结果内联显示。**不走 chat.history**，通过三个新 bg 消息 `dev_run_act` / `dev_run_perceive` / `dev_capabilities` 直通 executeAct / extractDOM，避免污染会话。生产构建 (`pnpm build`) 里 `import.meta.env.DEV = false`，DevPanel 被 tree-shake 掉。
+
+### 扩展的 `act` ops（补齐浏览器自动化能力）
+
+这些是在 phase 4 之后新加的 op，填充常见 agent 工作流的空白：
+
+| op | 目的 | 为什么需要 |
+|----|------|-----------|
+| `fill_form` | 批量填表 | 登录 / checkout 场景一次 N 个字段。逐个 `fill` 会 N×(gateway RTT + polling tick)，累积延迟难看。 |
+| `list_tabs` | 列出所有 tab | 原来只暴露 `tabCount`，agent 无法引用"切到 github 那个 tab"。 |
+| `wait_for_url` | 等 URL 匹配 | 点击登录 → 等 `/dashboard`。`wait_for` 是等元素，这一条是等导航完成。 |
+| `get_all_links` | 一次拿全链接 | `perceive.dom.interactive` 限 50 条。长文章 / 搜索结果页经常 100+ 链接。 |
+| `get_article_text` | 提取正文 | 读长文章。启发式：优先 `<article>` → `<main>` → 段落最密的 section。不引 readability 依赖。 |
+| `press` 修饰键 | `ctrl+a` / `meta+shift+k` | 页面级 JS 快捷键处理（注：DOM 事件无法触发浏览器 chrome 级快捷键，像 `Ctrl+T` 开新 tab 需要用 `new_tab` op）。 |
+| `pierceShadow` flag | 穿透 shadow DOM | 现代 Web Components (Stripe、Shopify 组件、某些 DevTools) 把元素藏在 `shadowRoot`，`querySelector` 够不到。 |
+
+新 op 的实现全部在 `executeAct` switch 里，`handleAct` 把 `payload.fields` / `payload.pierceShadow` 透传进去。`describeOp` 也要同步更新（否则 UI 显示成 "undefined"）。
+
+### `capabilities` action
+
+agent 可以通过 `capabilities` 自查可用 action / op / flag / 当前浏览器状态，不再依赖静态文档。返回数据结构见 `AGENT_PROTOCOL.md`。当我们将来删除或重命名 op 时，agent 能通过比对 `capabilities` 与本地期望优雅降级。
+
 ## 链接打开方式
 
 聊天气泡里的 markdown 链接（裸 URL 或 `[text](url)`）通过两层处理保证"点击 = 在新标签打开"：

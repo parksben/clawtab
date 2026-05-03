@@ -99,6 +99,7 @@ interface BackgroundState {
   handshakeInFlight: boolean;
   logs: DiagLogEntry[];
   logPersistTimer: ReturnType<typeof setTimeout> | null;
+  processedPersistTimer: ReturnType<typeof setTimeout> | null;
 }
 
 const S: BackgroundState = {
@@ -151,6 +152,7 @@ const S: BackgroundState = {
   handshakeInFlight: false,
   logs: [],
   logPersistTimer: null,
+  processedPersistTimer: null,
 };
 
 // ═══════════════════════════════════════════════════════
@@ -170,6 +172,36 @@ async function loadLogs(): Promise<void> {
   } catch {
     /* keep S.logs */
   }
+}
+
+// processedCmds is the cmdId dedup set. Without persistence, every SW restart
+// (Chrome MV3 kills idle SWs aggressively — default 30s) would re-process any
+// clawtab_cmd still sitting in chat.history, running perceive/act again on
+// the user's currently-active tab. Users see it as "tab switches keep
+// re-sending data to the agent" because replayed perceives capture whatever
+// tab is active at restart time, not the tab at original cmd time.
+const PROCESSED_CMDS_CAP = 300;
+
+async function loadProcessedCmds(): Promise<void> {
+  try {
+    const { processed_cmds } = (await chrome.storage.local.get('processed_cmds')) as {
+      processed_cmds?: string[];
+    };
+    if (Array.isArray(processed_cmds)) {
+      for (const id of processed_cmds) S.loop.processedCmds.add(id);
+    }
+  } catch {
+    /* keep empty set */
+  }
+}
+
+function persistProcessedCmdsSoon(): void {
+  if (S.processedPersistTimer) return;
+  S.processedPersistTimer = setTimeout(() => {
+    S.processedPersistTimer = null;
+    const arr = Array.from(S.loop.processedCmds).slice(-PROCESSED_CMDS_CAP);
+    chrome.storage.local.set({ processed_cmds: arr }).catch(() => {});
+  }, 250);
 }
 
 function persistLogsSoon(): void {
@@ -1135,10 +1167,11 @@ async function handleCmd(cmd: ClawtabCmd): Promise<void> {
   }
 
   S.loop.processedCmds.add(cmdId);
-  if (S.loop.processedCmds.size > 300) {
+  if (S.loop.processedCmds.size > PROCESSED_CMDS_CAP) {
     const first = S.loop.processedCmds.values().next().value;
     if (first) S.loop.processedCmds.delete(first);
   }
+  persistProcessedCmdsSoon();
 
   S.lastCmd = action;
   S.loop.cmdId = cmdId;
@@ -1167,6 +1200,9 @@ async function handleCmd(cmd: ClawtabCmd): Promise<void> {
         break;
       case 'cancel':
         await handleCancel(cmd);
+        break;
+      case 'capabilities':
+        await handleCapabilities(cmd);
         break;
       default: {
         const _exhaustive: never = action;
@@ -1253,6 +1289,73 @@ async function handleCancel(cmd: Extract<ClawtabCmd, { action: 'cancel' }>): Pro
     cmdId: cmd.cmdId,
     ok: true,
     data: { message: 'Task cancelled', wasRunning },
+  });
+}
+
+async function handleCapabilities(
+  cmd: Extract<ClawtabCmd, { action: 'capabilities' }>,
+): Promise<void> {
+  await sendResult({
+    cmdId: cmd.cmdId,
+    ok: true,
+    data: {
+      version: VERSION,
+      protocolVersion: 1,
+      actions: [
+        'perceive',
+        'act',
+        'task_start',
+        'task_done',
+        'task_fail',
+        'cancel',
+        'capabilities',
+      ],
+      perceiveInclude: [
+        'screenshot',
+        'title',
+        'url',
+        'dom',
+        'scroll_position',
+        'all',
+      ],
+      ops: [
+        'click',
+        'fill',
+        'fill_form',
+        'clear',
+        'navigate',
+        'scroll',
+        'scroll_by',
+        'scroll_to_element',
+        'press',
+        'select',
+        'hover',
+        'wait',
+        'wait_for',
+        'wait_for_url',
+        'get_text',
+        'get_attr',
+        'get_all_links',
+        'get_article_text',
+        'new_tab',
+        'close_tab',
+        'switch_tab',
+        'list_tabs',
+        'go_back',
+        'go_forward',
+        'screenshot_element',
+        'eval',
+      ],
+      flags: {
+        pierceShadow: 'click/fill/clear/get_text/hover/scroll_to_element',
+        fillBatchField: 'fill_form',
+        pressModifiers: 'press (e.g. "ctrl+a", "meta+shift+k")',
+      },
+      browser: {
+        browserId: S.browserId,
+        tabCount: S.tabCount,
+      },
+    },
   });
 }
 
@@ -1489,6 +1592,8 @@ async function handleAct(cmd: Extract<ClawtabCmd, { action: 'act' }>): Promise<v
     op,
     target,
     value,
+    fields,
+    pierceShadow = false,
     waitAfter = 500,
     captureAfter = true,
     timeout = ACT_TIMEOUT,
@@ -1502,6 +1607,8 @@ async function handleAct(cmd: Extract<ClawtabCmd, { action: 'act' }>): Promise<v
     targetTabId,
     target: typeof target === 'string' ? target.slice(0, 80) : target,
     value: typeof value === 'string' ? value.slice(0, 80) : value,
+    pierceShadow,
+    hasFields: !!fields,
     timeout,
   });
   setLoopStatus('acting', opDesc);
@@ -1509,7 +1616,7 @@ async function handleAct(cmd: Extract<ClawtabCmd, { action: 'act' }>): Promise<v
 
   try {
     const result = (await Promise.race([
-      executeAct(targetTabId, op, target, value, waitAfter),
+      executeAct(targetTabId, op, target, value, waitAfter, { fields, pierceShadow }),
       new Promise<never>((_res, rej) =>
         setTimeout(() => rej(new Error(`Act timeout: ${op}`)), timeout),
       ),
@@ -1583,6 +1690,8 @@ function describeOp(op: string, target: unknown, value: unknown): string {
       return t ? `Clicking ${t}` : 'Clicking element';
     case 'fill':
       return t && v ? `Typing ${v} into ${t}` : 'Filling input';
+    case 'fill_form':
+      return 'Filling form';
     case 'clear':
       return t ? `Clearing ${t}` : 'Clearing input';
     case 'navigate':
@@ -1603,16 +1712,24 @@ function describeOp(op: string, target: unknown, value: unknown): string {
       return `Waiting ${value || target || 1000}ms`;
     case 'wait_for':
       return t ? `Waiting for ${t}` : 'Waiting for element';
+    case 'wait_for_url':
+      return t ? `Waiting for URL ${t}` : 'Waiting for URL';
     case 'get_text':
       return t ? `Reading text from ${t}` : 'Reading text';
     case 'get_attr':
       return t ? `Reading ${v || 'attr'} from ${t}` : 'Reading attribute';
+    case 'get_all_links':
+      return 'Listing links';
+    case 'get_article_text':
+      return 'Reading article';
     case 'new_tab':
       return `Opening new tab${t ? ': ' + t : ''}`;
     case 'close_tab':
       return `Closing tab ${target || ''}`;
     case 'switch_tab':
       return t ? `Switching to tab ${t}` : 'Switching tab';
+    case 'list_tabs':
+      return 'Listing tabs';
     case 'go_back':
       return 'Going back';
     case 'go_forward':
@@ -1632,7 +1749,12 @@ async function executeAct(
   target: unknown,
   value: unknown,
   waitAfter: number,
+  opts: {
+    fields?: Record<string, string>;
+    pierceShadow?: boolean;
+  } = {},
 ): Promise<Record<string, unknown>> {
+  const pierceShadow = !!opts.pierceShadow;
   switch (op) {
     case 'navigate': {
       await chrome.tabs.update(tabId, { url: String(value || target) });
@@ -1643,23 +1765,33 @@ async function executeAct(
       await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (sel: string) => {
-          const el =
-            document.querySelector(sel) ||
-            (() => {
-              for (const e of document.querySelectorAll('*'))
-                if (
-                  e.textContent?.trim() === sel ||
-                  e.getAttribute('aria-label') === sel
-                )
-                  return e as HTMLElement;
-              return null;
-            })();
+        func: (sel: string, pierce: boolean) => {
+          function findOne(root: Document | ShadowRoot, query: string): Element | null {
+            const direct = root.querySelector(query);
+            if (direct) return direct;
+            if (!pierce) return null;
+            const hosts = root.querySelectorAll('*');
+            for (const h of hosts) {
+              const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+              if (sr) {
+                const found = findOne(sr, query);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          function findByText(query: string): Element | null {
+            for (const e of document.querySelectorAll('*'))
+              if (e.textContent?.trim() === query || e.getAttribute('aria-label') === query)
+                return e as HTMLElement;
+            return null;
+          }
+          const el = findOne(document, sel) || findByText(sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           (el as HTMLElement).click();
           el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
         },
-        args: [String(target)],
+        args: [String(target), pierceShadow],
       });
       if (waitAfter) await new Promise((r) => setTimeout(r, waitAfter));
       return { op, clicked: target };
@@ -1668,8 +1800,21 @@ async function executeAct(
       await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (sel: string, val: string) => {
-          const el = document.querySelector<HTMLInputElement>(sel);
+        func: (sel: string, val: string, pierce: boolean) => {
+          function findOne(root: Document | ShadowRoot, query: string): Element | null {
+            const direct = root.querySelector(query);
+            if (direct) return direct;
+            if (!pierce) return null;
+            for (const h of root.querySelectorAll('*')) {
+              const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+              if (sr) {
+                const found = findOne(sr, query);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          const el = findOne(document, sel) as HTMLInputElement | null;
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.focus();
           el.value = val;
@@ -1677,17 +1822,84 @@ async function executeAct(
             el.dispatchEvent(new Event(ev, { bubbles: true })),
           );
         },
-        args: [String(target), String(value || '')],
+        args: [String(target), String(value || ''), pierceShadow],
       });
       if (waitAfter) await new Promise((r) => setTimeout(r, waitAfter));
       return { op, filled: target, value };
+    }
+    case 'fill_form': {
+      // Batch fill for login / checkout / long forms. Avoids N separate
+      // clawtab_cmd round trips — each is a ~300ms gateway RTT + polling tick.
+      const fieldMap = opts.fields || {};
+      const keys = Object.keys(fieldMap);
+      if (keys.length === 0) {
+        throw new Error('fill_form requires a non-empty payload.fields map');
+      }
+      const filled: Array<{ selector: string; ok: boolean; error?: string }> = [];
+      for (const sel of keys) {
+        const val = String(fieldMap[sel] ?? '');
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            world: 'MAIN',
+            func: (s: string, v: string, pierce: boolean) => {
+              function findOne(
+                root: Document | ShadowRoot,
+                query: string,
+              ): Element | null {
+                const direct = root.querySelector(query);
+                if (direct) return direct;
+                if (!pierce) return null;
+                for (const h of root.querySelectorAll('*')) {
+                  const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+                  if (sr) {
+                    const found = findOne(sr, query);
+                    if (found) return found;
+                  }
+                }
+                return null;
+              }
+              const el = findOne(document, s) as HTMLInputElement | null;
+              if (!el) throw new Error(`Element not found: ${s}`);
+              el.focus();
+              el.value = v;
+              ['input', 'change', 'keyup'].forEach((ev) =>
+                el.dispatchEvent(new Event(ev, { bubbles: true })),
+              );
+            },
+            args: [sel, val, pierceShadow],
+          });
+          filled.push({ selector: sel, ok: true });
+        } catch (e) {
+          filled.push({
+            selector: sel,
+            ok: false,
+            error: (e as Error).message,
+          });
+        }
+      }
+      if (waitAfter) await new Promise((r) => setTimeout(r, waitAfter));
+      return { op, filled, total: keys.length };
     }
     case 'clear': {
       await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (sel: string) => {
-          const el = document.querySelector<HTMLInputElement>(sel);
+        func: (sel: string, pierce: boolean) => {
+          function findOne(root: Document | ShadowRoot, query: string): Element | null {
+            const direct = root.querySelector(query);
+            if (direct) return direct;
+            if (!pierce) return null;
+            for (const h of root.querySelectorAll('*')) {
+              const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+              if (sr) {
+                const found = findOne(sr, query);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          const el = findOne(document, sel) as HTMLInputElement | null;
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.focus();
           el.value = '';
@@ -1695,27 +1907,69 @@ async function executeAct(
             el.dispatchEvent(new Event(ev, { bubbles: true })),
           );
         },
-        args: [String(target)],
+        args: [String(target), pierceShadow],
       });
       if (waitAfter) await new Promise((r) => setTimeout(r, waitAfter));
       return { op, cleared: target };
     }
     case 'press': {
+      // Supports plain keys ("Enter", "Escape") and combos ("ctrl+a",
+      // "meta+shift+k"). Combos parse the leading modifier tokens and
+      // dispatch a KeyboardEvent with the right modifier flags set. Note:
+      // DOM-level key dispatch reaches page-level JS listeners but cannot
+      // trigger browser chrome shortcuts (Ctrl+T to open a new tab, etc.);
+      // for those, use the dedicated op (new_tab/navigate/...).
+      const raw = String(value || target || '');
+      const parts = raw.split('+').map((s) => s.trim()).filter(Boolean);
+      const modTokens = new Set(['ctrl', 'control', 'shift', 'alt', 'option', 'meta', 'cmd', 'command']);
+      const modifiers = {
+        ctrlKey: false,
+        shiftKey: false,
+        altKey: false,
+        metaKey: false,
+      };
+      let mainKey = raw;
+      for (const p of parts) {
+        const lower = p.toLowerCase();
+        if (modTokens.has(lower)) {
+          if (lower === 'ctrl' || lower === 'control') modifiers.ctrlKey = true;
+          else if (lower === 'shift') modifiers.shiftKey = true;
+          else if (lower === 'alt' || lower === 'option') modifiers.altKey = true;
+          else if (lower === 'meta' || lower === 'cmd' || lower === 'command')
+            modifiers.metaKey = true;
+        } else {
+          mainKey = p;
+        }
+      }
       await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (key: string) => {
+        func: (
+          key: string,
+          mods: {
+            ctrlKey: boolean;
+            shiftKey: boolean;
+            altKey: boolean;
+            metaKey: boolean;
+          },
+        ) => {
           const el = document.activeElement || document.body;
           ['keydown', 'keypress', 'keyup'].forEach((ev) =>
             el.dispatchEvent(
-              new KeyboardEvent(ev, { key, code: key, bubbles: true, cancelable: true }),
+              new KeyboardEvent(ev, {
+                key,
+                code: key.length === 1 ? `Key${key.toUpperCase()}` : key,
+                bubbles: true,
+                cancelable: true,
+                ...mods,
+              }),
             ),
           );
         },
-        args: [String(value || target)],
+        args: [mainKey, modifiers],
       });
       if (waitAfter) await new Promise((r) => setTimeout(r, waitAfter));
-      return { op, pressed: value || target };
+      return { op, pressed: raw, mainKey, modifiers };
     }
     case 'select': {
       await chrome.scripting.executeScript({
@@ -1735,14 +1989,27 @@ async function executeAct(
       await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (sel: string) => {
-          const el = document.querySelector(sel);
+        func: (sel: string, pierce: boolean) => {
+          function findOne(root: Document | ShadowRoot, query: string): Element | null {
+            const direct = root.querySelector(query);
+            if (direct) return direct;
+            if (!pierce) return null;
+            for (const h of root.querySelectorAll('*')) {
+              const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+              if (sr) {
+                const found = findOne(sr, query);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          const el = findOne(document, sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           ['mouseover', 'mouseenter', 'mousemove'].forEach((ev) =>
             el.dispatchEvent(new MouseEvent(ev, { bubbles: true })),
           );
         },
-        args: [String(target)],
+        args: [String(target), pierceShadow],
       });
       if (waitAfter) await new Promise((r) => setTimeout(r, waitAfter));
       return { op, hovered: target };
@@ -1773,12 +2040,25 @@ async function executeAct(
       await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (sel: string, block: ScrollLogicalPosition) => {
-          const el = document.querySelector(sel);
+        func: (sel: string, block: ScrollLogicalPosition, pierce: boolean) => {
+          function findOne(root: Document | ShadowRoot, query: string): Element | null {
+            const direct = root.querySelector(query);
+            if (direct) return direct;
+            if (!pierce) return null;
+            for (const h of root.querySelectorAll('*')) {
+              const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+              if (sr) {
+                const found = findOne(sr, query);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          const el = findOne(document, sel);
           if (!el) throw new Error(`Element not found: ${sel}`);
           el.scrollIntoView({ behavior: 'smooth', block: block || 'center' });
         },
-        args: [String(target), (value as ScrollLogicalPosition) || 'center'],
+        args: [String(target), (value as ScrollLogicalPosition) || 'center', pierceShadow],
       });
       await new Promise((r) => setTimeout(r, 700));
       return { op, scrolledTo: target };
@@ -1803,21 +2083,155 @@ async function executeAct(
       }
       throw new Error(`wait_for timeout: "${String(target)}" not found within ${maxMs}ms`);
     }
+    case 'wait_for_url': {
+      // Waits for the active tab's URL to match a glob-ish pattern. Patterns
+      // support `*` (any substring) and `**` (any multi-segment substring).
+      // Use cases: "clicked Login, wait until we land on /dashboard".
+      const pattern = String(target || '');
+      if (!pattern) throw new Error('wait_for_url requires target pattern');
+      const maxMs = Number(value) || 15_000;
+      const reSource = pattern
+        .split('**')
+        .map((seg) =>
+          seg
+            .split('*')
+            .map((p) => p.replace(/[.+^${}()|[\]\\]/g, '\\$&'))
+            .join('.*'),
+        )
+        .join('.*');
+      const re = new RegExp('^' + reSource + '$');
+      const start = Date.now();
+      while (Date.now() - start < maxMs) {
+        try {
+          const tab = await chrome.tabs.get(tabId);
+          if (tab.url && re.test(tab.url)) {
+            return { op, url: tab.url, waitedMs: Date.now() - start };
+          }
+        } catch {
+          /* tab may be transitioning */
+        }
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      throw new Error(`wait_for_url timeout: "${pattern}" not reached within ${maxMs}ms`);
+    }
     case 'get_text': {
       const res = await chrome.scripting.executeScript({
         target: { tabId },
         world: 'MAIN',
-        func: (sel: string) => {
-          const el = document.querySelector<HTMLElement & HTMLInputElement>(sel);
+        func: (sel: string, pierce: boolean) => {
+          function findOne(root: Document | ShadowRoot, query: string): Element | null {
+            const direct = root.querySelector(query);
+            if (direct) return direct;
+            if (!pierce) return null;
+            for (const h of root.querySelectorAll('*')) {
+              const sr = (h as HTMLElement & { shadowRoot?: ShadowRoot }).shadowRoot;
+              if (sr) {
+                const found = findOne(sr, query);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          const el = findOne(document, sel) as (HTMLElement & HTMLInputElement) | null;
           if (!el) throw new Error(`Element not found: ${sel}`);
           return el.textContent?.trim() || el.value || el.innerText || '';
         },
-        args: [String(target)],
+        args: [String(target), pierceShadow],
       });
       const text = res?.[0]?.result;
       if (text === undefined || text === null)
         throw new Error(`Could not read text from: ${String(target)}`);
       return { op, selector: target, text };
+    }
+    case 'get_all_links': {
+      const maxCount = Number(value) || 500;
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: (selFilter: string, limit: number) => {
+          const q = selFilter && selFilter.trim() ? selFilter : 'a[href]';
+          const out: Array<{
+            href: string;
+            text: string;
+            title: string | null;
+            visible: boolean;
+          }> = [];
+          for (const el of Array.from(document.querySelectorAll<HTMLAnchorElement>(q))) {
+            if (out.length >= limit) break;
+            const rect = el.getBoundingClientRect();
+            out.push({
+              href: el.href,
+              text: (el.textContent || '').trim().slice(0, 160),
+              title: el.getAttribute('title'),
+              visible: rect.width > 0 && rect.height > 0,
+            });
+          }
+          return out;
+        },
+        args: [String(target || ''), maxCount],
+      });
+      return { op, links: res?.[0]?.result ?? [] };
+    }
+    case 'get_article_text': {
+      // Heuristic-based article extraction without pulling a readability dep
+      // into the service worker. Prefers <article>, then <main>, then the
+      // densest-text container. Strips nav/aside/footer/script/style text.
+      const maxChars = Number(value) || 20_000;
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        func: (limit: number) => {
+          const SKIP = new Set([
+            'SCRIPT',
+            'STYLE',
+            'NAV',
+            'ASIDE',
+            'FOOTER',
+            'HEADER',
+            'FORM',
+            'BUTTON',
+          ]);
+          function visibleText(root: Element): string {
+            const parts: string[] = [];
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+            let node: Node | null = walker.nextNode();
+            while (node) {
+              const parent = node.parentElement;
+              if (parent && !SKIP.has(parent.tagName)) {
+                const txt = node.nodeValue?.trim();
+                if (txt) parts.push(txt);
+              }
+              node = walker.nextNode();
+            }
+            return parts.join('\n');
+          }
+          const article = document.querySelector('article') || document.querySelector('main');
+          let chosen: Element = article || document.body;
+          if (!article) {
+            // Pick the element with the longest concatenated paragraph text.
+            let bestLen = 0;
+            for (const el of Array.from(document.querySelectorAll('section, div'))) {
+              const ps = el.querySelectorAll('p');
+              if (ps.length < 2) continue;
+              let len = 0;
+              for (const p of Array.from(ps)) len += (p.textContent || '').length;
+              if (len > bestLen) {
+                bestLen = len;
+                chosen = el;
+              }
+            }
+          }
+          const text = visibleText(chosen).slice(0, limit);
+          return {
+            title: document.title,
+            url: location.href,
+            text,
+            truncated: text.length >= limit,
+          };
+        },
+        args: [maxChars],
+      });
+      return { op, ...(res?.[0]?.result as object) };
     }
     case 'get_attr': {
       const res = await chrome.scripting.executeScript({
@@ -1865,6 +2279,26 @@ async function executeAct(
       S.loop.tabId = switchId;
       const tab = await chrome.tabs.get(switchId);
       return { op, switchedToTabId: switchId, url: tab.url, title: tab.title };
+    }
+    case 'list_tabs': {
+      // Full tab inventory for the agent. Without this, agents only see the
+      // raw `tabCount` in status broadcasts and cannot reference specific
+      // tabs ("switch to the github tab") without perceive roundtrips.
+      const tabs = await chrome.tabs.query({});
+      const cleaned = tabs
+        .filter((t) => !!t.id)
+        .map((t) => ({
+          id: t.id!,
+          windowId: t.windowId,
+          url: t.url || '',
+          title: (t.title || '').slice(0, 200),
+          active: !!t.active,
+          pinned: !!t.pinned,
+          audible: !!t.audible,
+          muted: !!t.mutedInfo?.muted,
+          favIconUrl: t.favIconUrl,
+        }));
+      return { op, tabs: cleaned, total: cleaned.length };
     }
     case 'go_back': {
       await chrome.scripting.executeScript({
@@ -1967,22 +2401,6 @@ function pushHistory(entry: LoopHistoryStep): void {
 async function getActiveTabId(): Promise<number | undefined> {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   return tab?.id;
-}
-
-async function captureQuickSnapshot(): Promise<void> {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab) return;
-    S.loop.lastUrl = tab.url || '';
-    S.loop.lastTitle = tab.title || '';
-    S.loop.lastScreenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: 'jpeg',
-      quality: 40,
-    });
-    broadcastStatus();
-  } catch {
-    /* ignore */
-  }
 }
 
 async function reportTabs(): Promise<void> {
@@ -2519,6 +2937,131 @@ chrome.runtime.onMessage.addListener(
         case 'pick_mode_exited':
           sendResponse({ ok: true });
           break;
+        case 'dev_run_act': {
+          // Dev-panel direct invocation of an act op on the active tab.
+          // Bypasses chat.history / clawtab_result entirely so test runs
+          // don't pollute the conversation. Uses the real executeAct so the
+          // panel is a faithful smoke test.
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id) {
+              sendResponse({ ok: false, error: 'No active tab' });
+              break;
+            }
+            const data = await executeAct(
+              tab.id,
+              msg.op,
+              msg.target,
+              msg.value,
+              200,
+              { fields: msg.fields, pierceShadow: msg.pierceShadow },
+            );
+            if (msg.captureAfter !== false) {
+              try {
+                const t2 = await chrome.tabs.get(tab.id);
+                (data as Record<string, unknown>).screenshot =
+                  await chrome.tabs.captureVisibleTab(t2.windowId, {
+                    format: 'jpeg',
+                    quality: 65,
+                  });
+              } catch {
+                /* ignore screenshot failure */
+              }
+            }
+            sendResponse({ ok: true, data });
+          } catch (e) {
+            sendResponse({ ok: false, error: (e as Error).message });
+          }
+          break;
+        }
+        case 'dev_run_perceive': {
+          try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (!tab?.id) {
+              sendResponse({ ok: false, error: 'No active tab' });
+              break;
+            }
+            const include = msg.include || ['screenshot', 'title', 'url', 'dom'];
+            const data: Record<string, unknown> = {
+              url: tab.url,
+              title: tab.title,
+              tabId: tab.id,
+            };
+            if (include.includes('screenshot') || include.includes('all')) {
+              data.screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
+                format: 'jpeg',
+                quality: 60,
+              });
+            }
+            if (include.includes('dom') || include.includes('all')) {
+              const res = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: extractDOM,
+              });
+              data.dom = res?.[0]?.result || {};
+            }
+            sendResponse({ ok: true, data });
+          } catch (e) {
+            sendResponse({ ok: false, error: (e as Error).message });
+          }
+          break;
+        }
+        case 'dev_capabilities': {
+          sendResponse({
+            ok: true,
+            data: {
+              version: VERSION,
+              protocolVersion: 1,
+              actions: [
+                'perceive',
+                'act',
+                'task_start',
+                'task_done',
+                'task_fail',
+                'cancel',
+                'capabilities',
+              ],
+              ops: [
+                'click',
+                'fill',
+                'fill_form',
+                'clear',
+                'navigate',
+                'scroll',
+                'scroll_by',
+                'scroll_to_element',
+                'press',
+                'select',
+                'hover',
+                'wait',
+                'wait_for',
+                'wait_for_url',
+                'get_text',
+                'get_attr',
+                'get_all_links',
+                'get_article_text',
+                'new_tab',
+                'close_tab',
+                'switch_tab',
+                'list_tabs',
+                'go_back',
+                'go_forward',
+                'screenshot_element',
+                'eval',
+              ],
+              flags: {
+                pierceShadow: 'click/fill/clear/get_text/hover/scroll_to_element',
+                fillBatchField: 'fill_form',
+                pressModifiers: 'press (e.g. "ctrl+a", "meta+shift+k")',
+              },
+              browser: {
+                browserId: S.browserId,
+                tabCount: S.tabCount,
+              },
+            },
+          });
+          break;
+        }
         default: {
           // Unknown message — fall through without erroring to keep the channel stable.
           sendResponse({ ok: false, error: 'unknown' });
@@ -2550,7 +3093,13 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
         chrome.tabs.sendMessage(tab.id, { type: 'exit_pick_mode' }).catch(() => {});
     }
   });
-  if (S.wsConnected && S.loop.status === 'idle') captureQuickSnapshot();
+  // Intentionally NOT calling captureQuickSnapshot() here: auto-screenshotting
+  // every tab switch both (a) eats the 1-per-second chrome.tabs.captureVisibleTab
+  // rate limit, which makes subsequent legitimate perceive calls fail, and
+  // (b) creates the illusion that "switching tabs re-sends data to the agent"
+  // even though nothing is actually dispatched. Screenshots should only be
+  // taken during perceive/act commands that the agent (or a test harness)
+  // explicitly requests.
 });
 
 chrome.alarms.create('keepalive', { periodInMinutes: 0.4 });
@@ -2576,7 +3125,11 @@ chrome.action.onClicked.addListener(async (tab) => {
 async function init(): Promise<void> {
   drawIcon('idle');
   await loadLogs();
-  logEvent('info', 'bg', 'SW init', { version: VERSION });
+  await loadProcessedCmds();
+  logEvent('info', 'bg', 'SW init', {
+    version: VERSION,
+    processedCmdsRestored: S.loop.processedCmds.size,
+  });
   S.deviceIdentity = await loadOrCreateDevice();
   const data = (await chrome.storage.local.get([
     'gatewayUrl',

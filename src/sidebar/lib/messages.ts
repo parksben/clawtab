@@ -55,6 +55,32 @@ export const bg = {
   enterPickMode: () => sendBg({ type: 'enter_pick_mode' }),
   exitPickMode: () => sendBg({ type: 'exit_pick_mode' }),
   flashElement: (selector: string) => sendBg({ type: 'flash_element', selector }),
+
+  // Dev-panel only — gated on `import.meta.env.DEV` by callers.
+  devRunAct: (args: {
+    op: string;
+    target?: string | number;
+    value?: string | number;
+    fields?: Record<string, string>;
+    pierceShadow?: boolean;
+    captureAfter?: boolean;
+  }) =>
+    sendBg<{
+      ok: boolean;
+      data?: Record<string, unknown>;
+      error?: string;
+    }>({ type: 'dev_run_act', ...args }),
+  devRunPerceive: (include?: Array<
+    'screenshot' | 'title' | 'url' | 'dom' | 'scroll_position' | 'all'
+  >) =>
+    sendBg<{ ok: boolean; data?: Record<string, unknown>; error?: string }>({
+      type: 'dev_run_perceive',
+      include,
+    }),
+  devCapabilities: () =>
+    sendBg<{ ok: boolean; data?: Record<string, unknown>; error?: string }>({
+      type: 'dev_capabilities',
+    }),
 };
 
 export function clog(
