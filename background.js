@@ -1248,6 +1248,47 @@ chrome.runtime.onMessage.addListener((msg,_,sendResponse)=>{
         })();
         return true;
 
+      case 'sidebar_reset_context':
+        // "清空上下文" button flow (docs/TECH_DESIGN.md §清空上下文):
+        //   1) send "/new" to the agent   — resets the agent-side context
+        //   2) drop hs_<sessionKey> + lsid_<sessionKey>
+        //   3) re-dispatch handshake      — so the fresh context still knows
+        //                                   about the clawtab_cmd protocol
+        (async()=>{
+          if (!S.wsConnected || !S.ws || S.ws.readyState !== WebSocket.OPEN) {
+            const wsState = S.ws ? ['CONNECTING','OPEN','CLOSING','CLOSED'][S.ws.readyState] : 'NULL';
+            logEvent('warn','bg','sidebar_reset_context: WS not ready', { wsState });
+            sendResponse({ok:false, error:`WebSocket 未连接（${wsState}）`});
+            return;
+          }
+          const sk = msg.sessionKey || S.sessionKey;
+          try {
+            logEvent('info','bg','reset_context: sending /new', { sessionKey: sk });
+            await wsRequest('chat.send', { sessionKey: sk, message: '/new', deliver: true, idempotencyKey: crypto.randomUUID() }, 10000);
+
+            const hsKey   = `hs_${sk}`;
+            const lsidKey = `lsid_${sk}`;
+            await chrome.storage.local.remove([hsKey, lsidKey]);
+            if (sk === S.sessionKey) S.lastSeenMsgId = null;
+            logEvent('info','bg','reset_context: cleared hs + lsid flags');
+
+            // Only re-dispatch handshake for the currently-connected session —
+            // if the sidebar was showing a different sessionKey and submitted
+            // this request, we don't want to emit a handshake on behalf of a
+            // session we aren't actually holding the WS for.
+            if (sk === S.sessionKey) {
+              await sendHandshake();
+            } else {
+              logEvent('warn','bg','reset_context: sk mismatch, skipping handshake re-dispatch', { requested: sk, current: S.sessionKey });
+            }
+            sendResponse({ok:true});
+          } catch(e) {
+            logEvent('error','bg','reset_context failed', { error: e.message });
+            sendResponse({ok:false, error: e.message});
+          }
+        })();
+        return true;
+
       case 'sidebar_list_agents':
         (async()=>{
           try {

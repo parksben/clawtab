@@ -54,6 +54,10 @@ const SB_I18N = {
     clearLogsConfirm: 'Clear all diagnostic logs on this browser?',
     logsCleared:   'Logs cleared',
     exportFailed:  'Failed to export logs',
+    // ── Clear context ──
+    clearContext:        'New conversation (clear context)',
+    clearContextConfirm: 'Clear this conversation and reset the agent context?',
+    clearContextFailed:  'Failed to reset context',
   },
   zh: {
     // ── Config page ──
@@ -102,6 +106,10 @@ const SB_I18N = {
     clearLogsConfirm: '确定要清除浏览器里所有诊断日志吗？',
     logsCleared:   '日志已清除',
     exportFailed:  '导出日志失败',
+    // ── Clear context ──
+    clearContext:        '新对话（清空上下文）',
+    clearContextConfirm: '清空当前对话并重置 Agent 上下文？',
+    clearContextFailed:  '清空上下文失败',
   },
 };
 
@@ -162,6 +170,16 @@ function msgText(msg) {
 function msgKey(m) {
   if (m.id) return `id:${m.id}`;
   return `c:${m.role}|${msgText(m).slice(0, 300)}`;
+}
+
+// Infrastructure messages that the sidebar sends on behalf of the user but that
+// should not appear in the chat timeline (currently only the `/new` reset
+// command dispatched by "Clear context"). They still sit in chat.history on the
+// Gateway — this filter just stops the UI from rendering them.
+function isHiddenInfraMsg(m) {
+  if (m.role !== 'user') return false;
+  const text = msgText(m).trim();
+  return text === '/new';
 }
 
 function extractJsonBlock(text) {
@@ -602,6 +620,36 @@ async function clearLogs() {
   catch(_) {}
 }
 
+// ── Clear context (/new) ───────────────────────────────────────────────────
+
+async function doClearContext() {
+  if (!STATE.wsConnected) return;
+  if (!confirm(sbt('clearContextConfirm'))) return;
+
+  // UI must clear BEFORE sending /new so the poll that picks up /new + the
+  // re-dispatched handshake appends into a blank state (see TECH_DESIGN.md).
+  STATE.messages           = [];
+  STATE.lastMsgId          = null;
+  STATE.pendingEchoContent = null;
+  STATE.waiting            = false;
+  clearTimeout(STATE.waitingTimer);
+  hideThinking();
+  updateSendBtn();
+  renderAll();
+
+  clog('info', 'clear context initiated', { sessionKey: sessionKey() });
+  try {
+    const res = await bg({ type: 'sidebar_reset_context', sessionKey: sessionKey() });
+    if (!res?.ok) {
+      clog('warn', 'clear context reported failure', { error: res?.error });
+      showToast(sbt('clearContextFailed'), true);
+    }
+  } catch (e) {
+    clog('error', 'clear context threw', { error: e.message });
+    showToast(sbt('clearContextFailed'), true);
+  }
+}
+
 // ── Thinking indicator ─────────────────────────────────────────────────────
 
 function showThinking() {
@@ -779,6 +827,7 @@ function renderAll() {
   }
 
   const visible = STATE.messages.filter(m => {
+    if (isHiddenInfraMsg(m)) return false;
     const text = msgText(m);
     const json = extractJsonBlock(text);
     if (json?.type === 'clawtab_result') return false;
@@ -804,6 +853,10 @@ function renderAll() {
 }
 
 function buildMsgNode(msg) {
+  // Hide infrastructure messages like "/new" — they belong in chat.history on
+  // the gateway (so the agent acts on them) but not in the user-facing stream.
+  if (isHiddenInfraMsg(msg)) return null;
+
   const role = msg.role === 'user' ? 'user' : 'assistant';
   const text = msgText(msg);
   const toolCalls = extractToolCalls(msg);
@@ -1061,6 +1114,7 @@ function updateStatus() {
   const input     = document.getElementById('msgInput');
   const inputArea = document.querySelector('.sb-input-area');
   const pickBtn   = document.getElementById('pickBtn');
+  const clearBtn  = document.getElementById('clearChatBtn');
 
   if (STATE.wsConnected) {
     if (dot)       dot.className     = 'sb-status-dot connected';
@@ -1069,6 +1123,7 @@ function updateStatus() {
     if (input)     input.placeholder = sbt('placeholderOn');
     inputArea?.classList.remove('sb-disconnected');
     if (pickBtn)   pickBtn.disabled  = false;
+    if (clearBtn)  clearBtn.disabled = false;
   } else if (STATE.reconnecting) {
     if (dot)       dot.className     = 'sb-status-dot connecting';
     if (text)      text.textContent  = sbt('reconnecting');
@@ -1076,6 +1131,7 @@ function updateStatus() {
     if (input)     input.placeholder = sbt('placeholderReconnecting');
     inputArea?.classList.add('sb-disconnected');
     if (pickBtn)   pickBtn.disabled  = true;
+    if (clearBtn)  clearBtn.disabled = true;
   } else {
     if (dot)       dot.className     = 'sb-status-dot';
     if (text)      text.textContent  = sbt('disconnected');
@@ -1083,6 +1139,7 @@ function updateStatus() {
     if (input)     input.placeholder = sbt('placeholderOff');
     inputArea?.classList.add('sb-disconnected');
     if (pickBtn)   pickBtn.disabled  = true;
+    if (clearBtn)  clearBtn.disabled = true;
   }
   updateSendBtn();
 }
@@ -1263,6 +1320,8 @@ document.getElementById('pickBtn').addEventListener('click', () => {
   if (!STATE.wsConnected) return;
   togglePickMode();
 });
+
+document.getElementById('clearChatBtn').addEventListener('click', doClearContext);
 
 document.getElementById('msgInput').addEventListener('keydown', e => {
   const dropdown = document.getElementById('pickAutocomplete');

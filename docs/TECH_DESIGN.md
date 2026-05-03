@@ -108,6 +108,38 @@ if (!alreadySent && !S.lastSeenMsgId) await sendHandshake();
 
 如果第一次发送真的失败（例如 Gateway 收到了但 wsRequest 抛错、且 Gateway 也确实没入库），按上述策略我们不会重试，Agent 会缺少协议上下文。这是显式权衡：用户可见的"重复回复"远比"少一次提示"刺眼，且用户可以通过换一个 channel name 重新发起握手。
 
+### 清空上下文是握手重发的唯一入口
+
+聊天输入框左侧的"清空上下文"按钮显式触发握手重发。流程在 `sidebar_reset_context` handler：
+
+```
+sidebar: 清 STATE.messages / DOM
+  ↓ bg({type:'sidebar_reset_context'})
+bg: chat.send('/new', deliver=true)      ← 让 agent 侧重置记忆
+bg: storage.remove([hs_<sk>, lsid_<sk>]) ← 本地清标记与轮询游标
+bg: sendHandshake()                       ← 标记已清，所以这次会真发
+```
+
+其他路径（connect.ok、reconnect、SW 重启）仍然按上面的三层防护保持"最多一次"。
+
+## 清空上下文（`/new`）
+
+聊天输入框左侧"新对话"按钮的完整 UX 与数据流：
+
+1. **仅在已连接时可用**（按 `STATE.wsConnected` 联动 disabled，与拾取按钮的启用逻辑复用同一个 `updateStatus()`）。
+2. **点击 → confirm**（国际化文案 `clearContextConfirm`）。用户确认后执行重置。
+3. **sidebar 本地清理**：`STATE.messages`、`STATE.lastMsgId`、`STATE.pendingEchoContent`、`STATE.waiting` 一次性清掉；隐藏 thinking indicator；`renderAll()` 重绘为"空会话"占位态。
+4. **调用 `sidebar_reset_context`**：由 background 负责三件事（保持原子 —— 前两步一个也不能漏）：
+   1. `chat.send` 消息体 `"/new"`，`deliver:true`，由 Gateway 识别为 slash command 重置该 session。
+   2. `chrome.storage.local.remove([hs_<sk>, lsid_<sk>])`。
+   3. `sendHandshake()` 再走一遍（此时 hs 标记已清，`sendHandshake` 内部的 storage 再检查 → miss → 真发）。
+5. **渲染过滤**：`/new` 自己会出现在 `chat.history` 里，但 `buildMsgNode` 和 `renderAll` 的 `visible` filter 都会跳过 `role === 'user' && text.trim() === '/new'`，不在 UI 上渲染这条"基础设施消息"。
+6. 用户可见的结果：点完之后先是空白，短暂延迟后出现新的"🦾 ClawTab 已连接…"气泡 + agent 对握手的回复，工具立即可用。
+
+### 为什么清空 UI 这一步必须走在 `/new` 之前
+
+先清 UI + 先清 `lastMsgId`，意味着接下来 polling 拉回来的 `/new` 和新握手都会当成"新消息"去 append，而不是被旧的 seenKeys 拦下来。顺序反过来会看到"旧消息还在界面上、新握手被 dedup 掉"。
+
 ## 链接打开方式
 
 聊天气泡里的 markdown 链接（裸 URL 或 `[text](url)`）通过两层处理保证"点击 = 在新标签打开"：

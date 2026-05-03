@@ -24,6 +24,10 @@
 - **消息列表不应出现重复**：同一条消息（包括握手消息、Agent 回复、用户消息）只会在聊天列表中渲染一次，无论后台轮询了多少轮 `chat.history`。
 - 消息中的链接（markdown 自动识别的 URL 或显式 `[text](url)`）点击后会在浏览器**新标签页**中打开，不会替换 sidebar 自身。
 - 工具调用 / `clawtab_cmd` 以紧凑的图标行展示；`clawtab_result` 对用户隐藏。
+- **清空上下文**：输入框左侧（拾取按钮右侧）有一枚"新对话"按钮：
+  - 仅在已连接时可用，点击后弹 confirm 防止误触。
+  - 点击后：聊天区域立刻清空 → 向 agent 发一条 `/new` 指令（不渲染这条 user message，只用来告诉 agent 重置上下文）→ 本地清掉 `hs_<sessionKey>` 握手标记 → 自动重新发一次协议握手消息，确保 agent 清空后仍然认识 `clawtab_cmd` 协议、工具不失效。
+  - 最终用户看到的效果：聊天从空开始 → 很快出现一条新的"🦾 ClawTab 已连接"握手气泡 → agent 就绪。
 
 ### 任务执行
 - Agent 可触发 `perceive` / `act` / `task_start` / `task_done` / `task_fail` / `cancel` 等命令。
