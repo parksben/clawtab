@@ -13,7 +13,7 @@ export default defineManifest({
   permissions: ['tabs', 'activeTab', 'scripting', 'storage', 'alarms', 'sidePanel'],
   host_permissions: ['<all_urls>'],
   side_panel: {
-    default_path: 'sidebar/sidebar.html',
+    default_path: 'src/sidebar/index.html',
   },
   background: {
     service_worker: 'src/background/index.ts',

@@ -1,0 +1,123 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── Global scrollbar polish (keep it quiet but visible) ─── */
+@layer base {
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: theme('colors.slate.300');
+    border-radius: 3px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: theme('colors.slate.400');
+  }
+}
+
+@layer components {
+  /* Markdown rendered inside a chat bubble. Kept as one block so the
+     nested tag styles don't pollute other surfaces. */
+  .md-bubble {
+    @apply leading-relaxed break-words whitespace-normal;
+  }
+  .md-bubble > *:first-child { margin-top: 0; }
+  .md-bubble > *:last-child  { margin-bottom: 0; }
+  .md-bubble p {
+    margin: 0 0 0.5em;
+  }
+  .md-bubble p:last-child { margin-bottom: 0; }
+  .md-bubble h1, .md-bubble h2, .md-bubble h3, .md-bubble h4 {
+    @apply font-semibold leading-snug;
+    margin: 0.6em 0 0.25em;
+  }
+  .md-bubble h1 { font-size: 15px; }
+  .md-bubble h2 { font-size: 14px; }
+  .md-bubble h3 { font-size: 13px; }
+  .md-bubble h4 { font-size: 12px; }
+  .md-bubble ul, .md-bubble ol {
+    margin: 0.3em 0 0.5em 1.2em;
+    padding: 0;
+  }
+  .md-bubble li { margin: 0.15em 0; }
+  .md-bubble pre {
+    background: theme('colors.slate.100');
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 11px;
+    overflow-x: auto;
+    margin: 0.4em 0;
+  }
+  .md-bubble pre code {
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
+  .md-bubble code {
+    background: theme('colors.slate.100');
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+    font-size: 11.5px;
+  }
+  .md-bubble blockquote {
+    border-left: 3px solid theme('colors.slate.300');
+    padding-left: 8px;
+    margin: 0.4em 0;
+    color: theme('colors.slate.500');
+  }
+  .md-bubble a {
+    @apply text-brand underline;
+  }
+  .md-bubble table {
+    border-collapse: collapse;
+    margin: 0.4em 0;
+    font-size: 11px;
+    max-width: 100%;
+  }
+  .md-bubble th,
+  .md-bubble td {
+    border: 1px solid theme('colors.slate.200');
+    padding: 4px 8px;
+    text-align: left;
+  }
+  .md-bubble th {
+    background: theme('colors.slate.50');
+    @apply font-semibold;
+  }
+  .md-bubble hr {
+    border: none;
+    border-top: 1px solid theme('colors.slate.200');
+    margin: 0.5em 0;
+  }
+  .md-bubble img {
+    max-width: 100%;
+    border-radius: 4px;
+  }
+
+  /* User bubble inverts code/link colors so they read on the indigo
+     background. */
+  .md-bubble-user code {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .md-bubble-user a {
+    color: rgba(255, 255, 255, 0.9);
+    text-decoration: underline;
+  }
+  .md-bubble-user pre {
+    background: rgba(255, 255, 255, 0.15);
+  }
+  .md-bubble-user blockquote {
+    border-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 0.8);
+  }
+  .md-bubble-user th {
+    background: rgba(255, 255, 255, 0.15);
+  }
+  .md-bubble-user th,
+  .md-bubble-user td {
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+}
