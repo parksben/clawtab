@@ -238,38 +238,29 @@ sidebar 拿到 bundle 后由 `formatDiagBundle()` 拼成可读纯文本，浏览
 - **Tooltip**：自研 ~50 行（`position:fixed` + `getBoundingClientRect()` + 边缘翻转），不引 radix-ui（sidepanel 包体敏感）。
 - **测试**：只对 `reducer.ts` / `msgKey` / `isHiddenInfraMsg` / `safeSerialize` 这几个纯函数加 Vitest，防止"握手重复"那类 bug 回归。不写组件测试。
 
-### 10 阶段节奏
+### 阶段节奏
 
-| Phase | 范围 | 退出条件 |
-|-------|------|----------|
-| 0 ✅ | **docs-only**：本路线图写入 `TECH_DESIGN.md`，`CLAUDE.md` 加一段"迁移进行中"提示。 | 代码零改动。 |
-| 1 ✅ | **脚手架**：`package.json` / `tsconfig.json` / `vite.config.ts` / `src/manifest.ts` / `.gitignore`。`@crxjs` 指向**现有**的 `background.js` / `sidebar/*` / `content/*` / `shared/*`。 | `pnpm build` 产出 `dist/`，Load unpacked `dist/` 行为 = Load unpacked 根目录。 |
-| 2 | **`content.js` + `shared/types` 迁 TS**。老 `shared/icons.js` 仍通过 `publicDir` 拷给旧 sidebar。 | content 脚本是 `.ts`，其他不变，扩展行为不变。 |
-| 3 | **background.js 模块化迁 TS**（最高风险）。按现有 SECTION 切文件，握手三层防护原样保留。 | 12 个测试流程全部通过：冷连接、WS 掉线重连、SW 手动 Terminate、`/new`、配对、日志导出、拾取+发送、任务取消、agent 切换、SW 重启冷启动、Gateway 掉线恢复、连续快速 connect/disconnect。 |
-| 4 | **接入 Tailwind**，老 `sidebar.css` 仍生效。 | 产物体积变化可忽略。 |
-| 5 | **React 外壳接管页面路由**，页面内容暂用 `dangerouslySetInnerHTML` 保留旧 HTML，`status_update` 驱动 `Config \| Pairing \| Chat` 页面切换走 `useReducer`。 | sidebar 挂载方式变了但看起来一样。 |
-| 6 | **ChatPage 组件化**：`ChatHeader` / `MessageList` / `MessageBubble` / `ToolRow` / `ThinkingIndicator` / `EmptyState` / `TaskBar` / `Lightbox`。`fetchHistory` + `msgKey` dedup + `pendingEchoContent` echo-replace 原样搬进 reducer，配 Vitest。 | 聊天、去重、链接新标签打开全部 OK。 |
-| 7 | **ConfigPage + InputArea + 拾取 + 清空上下文 + 诊断**组件化，**删除**老 `sidebar/` + `shared/icons.js` + 根目录 `background.js` / `manifest.json` / `content/`。根目录只留 docs + 构建配置。 | Phase 3 的 12 项测试再跑一遍。 |
-| 8 | **UI 改进**：Tooltip primitive、所有 icon-only 按钮加 tooltip、语言切换改 Globe 图标+动态目标语言 tooltip。 | REQUIREMENTS.md 记录按钮清单与文案。 |
-| 9 | **收尾**：`CLAUDE.md` 里"旧工作流"注释删掉，README 改成 `pnpm build --watch`，包体审计（期望 sidebar JS <300 KB）。 | 迁移结束。 |
+| Phase | 范围 | 状态 |
+|-------|------|------|
+| 0 | **docs-only**：路线图与原则写入 `TECH_DESIGN.md`。 | ✅ |
+| 1 | **脚手架**：`package.json` / `tsconfig.json` / `vite.config.ts` / `src/manifest.ts` / `.gitignore`。`@crxjs` 指向当时还在根目录的 `background.js` / `sidebar/*` / `content/*` / `shared/*`。 | ✅ |
+| 2 | **`content.js` + `src/shared/types` 迁 TS**。 | ✅ |
+| 3 | **`background.js` 迁 TS**（单文件 `src/background/index.ts`，~14 个 SECTION 旗标保留为注释分隔，方便后续按需 split）。`enter_pick_mode` 重新注入路径改用 `chrome.runtime.getManifest().content_scripts[0].js[0]` 拿运行时哈希路径。 | ✅ |
+| 4 | **接入 React + Tailwind + 完整重写 sidebar**：`src/sidebar/{App,main,index.html,styles.css,i18n.ts,components/*,hooks/*,lib/*,state/reducer.ts}`。删除 `sidebar/` 与 `shared/`。`vite.config.ts` 退役 `passThroughLegacyFiles`，加 `@vitejs/plugin-react` + `@` alias。`manifest.side_panel.default_path = 'src/sidebar/index.html'`。 | ✅ |
+| 5 | **Vitest 覆盖纯函数**：`message-utils`（msgKey / msgText / isHiddenInfraMsg / extractJsonBlock / extractToolCalls / isTerminalMsg）+ `reducer`（page routing / HYDRATE_HISTORY 三类 dedup / local-echo 替换 / waiting-flag 切换）。共 36 测试。 | ✅ |
+| 6 | **UI 改进：Tooltip 原语 + 所有 icon-only 按钮的 tooltip + Globe 语言切换**。`<IconButton>` 把 `tooltip` 设为必填 prop，所有调用位都不能漏。语言切换 tooltip 显示**目标语言**（`Switch to 中文` / `Switch to English`）。这一块和 Phase 4 一并落地。 | ✅ |
+| 7 | **收尾**：README 改成 `pnpm install && pnpm build` + Load unpacked `dist/`；`CLAUDE.md` 删掉所有"vanilla JS / 双工作流"残影；本路线图改为完成态。 | ✅ |
 
-### Phase 1 实现注记：`passThroughLegacyFiles` 插件
+### 当前架构注记
 
-当前 `sidebar/sidebar.html` 里的三个 `<script>` 标签（`lib/marked.min.js` / `../shared/icons.js` / `sidebar.js`）都是没有 `type="module"` 的传统脚本。Vite 默认只处理 ES module script，对非 module 脚本会打印警告、保留 HTML 里的 `<script src>` 引用、**但不会把被引用的文件拷进 `dist/`**。结果是 `dist/sidebar/sidebar.html` 引用了一堆不存在的路径。
-
-`vite.config.ts` 里 `passThroughLegacyFiles()` 这个 custom plugin 就是为 Phase 1 设计的过渡件：在 `generateBundle` 钩子里直接 `readFileSync` 三个文件再 `emitFile` 回 `dist/` 的原始路径，HTML 的相对 `<script src>` 能解析到。
-
-这三个文件分别在 Phase 7（`sidebar.js`、`marked.min.js`）和 Phase 7（`shared/icons.js`）被 React 版彻底取代，届时这个 plugin 连同它 watch 的 3 个路径一起删除。
-
-### 本阶段（Phase 0）就是这一节本身
-
-这一段写入即完成 Phase 0，不改动任何代码文件。下一 commit（Phase 1）加构建工具链，**不动任何现有业务代码**。
+- 整个 `src/` 树 100% TypeScript。根目录除了 `docs/` / 构建配置 / icon PNG / `manifest.ts` 已经没有业务代码。
+- Service Worker 仍是单文件 `src/background/index.ts`（~2.5K 行）。SECTION 注释分隔块原样保留 —— 当未来需要拆模块时（典型是 `ws.ts` / `poll.ts` / `handlers/{perceive,act,task}.ts` / `handshake.ts` / `messages.ts` / `tabs.ts`），这些 banner 直接对应文件边界。在拆之前不要拆，因为单文件让 Phase 3 的"原样搬运"风险最低。
+- Sidebar 的状态完全在 [src/sidebar/state/reducer.ts](../src/sidebar/state/reducer.ts) 这一个 reducer 里，只暴露 ~24 个 action。所有副作用（chrome.runtime / 计时器）都在 `App.tsx` 的 effect 里执行。这意味着握手 dedup 和"清空上下文"那两个反复出 bug 的流程，每条状态线都在 [src/sidebar/state/reducer.test.ts](../src/sidebar/state/reducer.test.ts) 里挂着回归测试。
+- Tailwind v3 + `lucide-react`。`src/sidebar/styles.css` 只有 `@tailwind base/components/utilities` 三层 + 一段 `.md-bubble` markdown 组件样式。
 
 ### 关于 zip 下载链接
 
-整个迁移过程中 `https://github.com/parksben/clawtab/archive/refs/heads/main.zip` **始终可用**：
-- Phase 1–6：根目录仍然是一份完整、独立的老 JS 扩展，可直接 Load unpacked。
-- Phase 7 之后：zip 解压后需要 `pnpm install && pnpm build`，然后 Load unpacked 解压出的 `dist/`。Phase 7 的 commit message + README 会明确这一切换点。
+`https://github.com/parksben/clawtab/archive/refs/heads/main.zip` 仍然可用，**但解压之后需要 `pnpm install && pnpm build`，然后 Load unpacked 解压出的 `dist/`** —— 不再像 Phase 0–6 那样"根目录直接可加载"。README + CLAUDE.md 都已经写明这一点。
 
 ### 风险与开放问题
 

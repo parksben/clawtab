@@ -2,50 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-> ⚠️ **Migration in progress**: the codebase is being migrated from pure vanilla JS to React + TypeScript + Tailwind + Vite across 10 phases. See `docs/TECH_DESIGN.md` → "迁移路线" for the roadmap and current phase. Until Phase 7 lands, the root-level vanilla files below **still work verbatim** via `Load unpacked` on the repo root. From Phase 1 on there is also a `dist/` produced by `pnpm build` that is equivalent.
-
 ## Project Overview
 
-ClawTab is a Chrome Extension (Manifest V3) that connects a browser to an OpenClaw Gateway, enabling AI agents to observe and control browser tabs. It is **pure vanilla JavaScript** — no build tools, no npm, no TypeScript, no framework.
+ClawTab is a Chrome Extension (Manifest V3) that connects a browser to an OpenClaw Gateway, enabling AI agents to observe and control browser tabs. The extension is built with **React + TypeScript + Tailwind + Vite + @crxjs/vite-plugin**, with `pnpm` as the package manager. There is no Vite dev server flow — sidepanel HMR inside `@crxjs` is flaky, so the developer loop is `pnpm build:watch` + a manual reload in `chrome://extensions/`.
 
 ## Development Workflow
 
-Two workflows are both supported during the migration (docs/TECH_DESIGN.md "迁移路线"). Pick whichever matches the branch state.
+1. `pnpm install` (once)
+2. `pnpm build:watch` (or `pnpm build` for a one-shot)
+3. Open `chrome://extensions/`, enable **Developer mode**
+4. Click **Load unpacked** → select **`dist/`** (NOT the repo root)
+5. After every code change, the watcher rebuilds `dist/`. Click the **refresh** icon on the extension card to reload it in the running Chrome.
 
-### Legacy vanilla workflow (works through Phase 7)
-
-1. Open `chrome://extensions/`
-2. Enable "Developer mode"
-3. Click "Load unpacked" → select **the repo root**
-4. After editing any file, click the refresh icon on the extension card
-
-No build step, no `npm install`. The root `manifest.json` + root-level `background.js` / `sidebar/` / `content/` / `shared/` / `icons/` keep working.
-
-### Vite build workflow (Phase 1+)
-
-1. `pnpm install` once.
-2. `pnpm build` — produces `dist/`.
-3. `chrome://extensions/` → "Load unpacked" → select **`dist/`**.
-4. After editing anything under `src/` (or root files Vite picks up), either rerun `pnpm build` or run `pnpm build:watch` in a terminal. Then click the refresh icon on the extension card.
-
-Scripts:
-- `pnpm build` — one-shot production build to `dist/`.
-- `pnpm build:watch` — rebuild on file change.
-- `pnpm typecheck` — `tsc --noEmit` over `src/`.
-
-There is no `pnpm dev` / HMR dev-server flow today. Sidepanel HMR inside `@crxjs` is flaky — prefer `build:watch` + manual reload. See docs/TECH_DESIGN.md risks §8.
+Other scripts:
+- `pnpm typecheck` — `tsc --noEmit` across `src/`
+- `pnpm test` — Vitest run (~36 tests against `message-utils` + `reducer`)
+- `pnpm test:watch` — Vitest watch mode
 
 ## Architecture
 
-The extension has three isolated components that communicate via `chrome.runtime.sendMessage`:
+The extension has three isolated runtimes that talk via `chrome.runtime.sendMessage`. Every message body is in the discriminated union at [src/shared/types/messages.ts](src/shared/types/messages.ts) — adding a new message type without handling it in the background switch fails to compile.
 
-| File | Role |
+| Path | Role |
 |------|------|
-| `background.js` | Service Worker — central hub managing WebSocket, command polling, tab operations |
-| `sidebar/sidebar.js` | Sidebar UI — dual-page (Config + Chat), renders messages, handles user input |
-| `content/content.js` | Content script — DOM element picker, injected into all pages |
+| [src/background/index.ts](src/background/index.ts) | Service Worker — central hub: WebSocket lifecycle, command polling (`chat.history` every 1–3s), command dispatcher (`perceive` / `act` / `task_*` / `cancel`), diagnostic ring buffer |
+| [src/content/index.ts](src/content/index.ts) | Content script — DOM element picker, page ops (`click` / `fill` / `scroll` / `eval` / `get_content`); injected into all pages |
+| [src/sidebar/](src/sidebar/) | React + Tailwind sidepanel — `App.tsx` owns the reducer; `components/` has Config / Chat / TaskBar / MessageBubble / InputArea / Tooltip / IconButton |
+| [src/shared/types/](src/shared/types/) | `messages.ts` (RPC + broadcasts), `protocol.ts` (clawtab_cmd / result / ChatMessage), `state.ts` (StatusSnapshot, DiagBundle), `picker.ts` (CapturedElement) |
 
-**`shared/icons.js`** provides the Lucide SVG sprite used across sidebar components.
+State management in the sidebar: a single `useReducer` in [src/sidebar/App.tsx](src/sidebar/App.tsx) driven by [src/sidebar/state/reducer.ts](src/sidebar/state/reducer.ts). The reducer is pure (no `chrome.*` IO), so all dedup / page-routing / waiting-flag transitions are unit-tested in [src/sidebar/state/reducer.test.ts](src/sidebar/state/reducer.test.ts).
 
 ### Connection & Pairing Flow
 
@@ -60,43 +45,45 @@ User fills config (URL, Token, Channel)
 
 ### Command Execution
 
-`background.js` polls `chat.history` for messages containing `clawtab_cmd` JSON blocks. Supported actions: `perceive` (DOM + JPEG screenshot), `act` (20+ browser operations), `task_start`, `task_done`, `task_fail`, `cancel`. Results are returned as `clawtab_result` JSON blocks (hidden from the chat UI).
+The background polls `chat.history` for assistant messages containing a `clawtab_cmd` JSON block. Supported actions: `perceive` (DOM + JPEG screenshot), `act` (20+ browser ops), `task_start`, `task_done`, `task_fail`, `cancel`. Results go back as `clawtab_result` blocks (filtered out of the chat UI). An exclusive lock ensures only one agent can execute `act`/`perceive` at a time; others receive `BUSY`.
 
-An **exclusive lock** ensures only one agent can execute `act`/`perceive` at a time; others receive `BUSY`.
+## Key Pitfalls (load-bearing — do not regress)
 
-## Key Pitfalls (from DEVELOPMENT.md)
+These are paid-for in production. Before touching the relevant code, re-read the matching section of [docs/TECH_DESIGN.md](docs/TECH_DESIGN.md).
 
-1. **Never cache DOM lookups in sidebar.js** — always call `document.getElementById()` in real-time; stale references silently fail after page re-renders.
+1. **Handshake three-layer dedup** — `sendHandshake()` uses (a) in-flight lock `S.handshakeInFlight`, (b) persistent `hs_<sessionKey>` flag in `chrome.storage.local` set BEFORE the network call, (c) post-set re-check covering SW-restart races. **Never remove the flag in the catch block** — a WS drop mid-request can reject our promise even though the Gateway already stored the message; removing the flag causes the agent to receive (and respond to) a duplicate handshake on every reconnect.
 
-2. **Gateway config requires full restart** — `SIGUSR1` reload won't pick up `allowedOrigins` changes; must fully restart the Gateway process.
+2. **connect.ok single-gate** — there is exactly one `sendHandshake()` call site, gated by `!alreadySent && !S.lastSeenMsgId`. The `isNewSession=true` branch must NOT clear `hsKey` (only `lastSeenMsgId` + `lsid_*`). Clearing `hsKey` on flapping gateway state is what produced the duplicate-handshake bug.
 
-3. **NOT_PAIRED state skips auto-reconnect** — manually polls every 5 sec instead of the normal 3-attempt exponential backoff.
+3. **Chat dedup via `msgKey()`** — `msgKey(m)` prefers `m.id` and falls back to `c:<role>|<content>`. The handshake echo from `chat.history` lacks a stable id, so id-only dedup leaks. Both `selectVisibleMessages` and `HYDRATE_HISTORY` use `msgKey()`. Tests in [src/sidebar/lib/message-utils.test.ts](src/sidebar/lib/message-utils.test.ts) pin this — they fail the moment id-only dedup creeps back.
 
-4. **`wsDisconnect()` must null WebSocket callbacks** — clear `onclose`/`onerror` before calling `.close()` to prevent recursive reconnect triggers.
+4. **`/new` is hidden infrastructure** — `isHiddenInfraMsg(m)` filters `role:'user' && text==='/new'` from both `selectVisibleMessages` and `MessageBubble` (returns `null`). Without this, "Clear context" doesn't actually look cleared.
 
-5. **`statusText` uses `data-i18n` attributes** — never assign `textContent` directly or it breaks on language switch; use the i18n helper.
+5. **Link clicks open new tabs via `chrome.tabs.create`** — `target="_blank"` alone is unreliable inside Chrome's sidepanel iframe. `MessageList.tsx` registers a delegated click handler that calls `chrome.tabs.create({ url, active: true })` and `preventDefault`s. `markdown.ts:sanitizeHtml` also rewrites every `<a>` to `target="_blank" rel="noopener noreferrer"` as defense in depth.
 
-6. **Ed25519 signature payload** — must use `openclaw-control-ui` + `webchat` mode; using `clawtab` or `operator` mode will reject pairing.
+6. **Service Worker is ephemeral** — in-memory `S.*` is wiped on SW termination. Anything that must survive sits in `chrome.storage.local`: `gatewayUrl/gatewayToken/browserName`, `deviceToken`, `manualDisconnect`, `hs_<sessionKey>`, `lsid_<sessionKey>`, `diag_logs`. The diagnostic logger calls `loadLogs()` first thing in `init()` to merge with any boot-window entries.
 
-7. **`flash_element` overlay is a singleton** — reuse the single overlay element; reset animation via `animation:none` + `offsetWidth` trick to force reflow before restarting.
+7. **`wsDisconnect` must null WS callbacks** — clear `onclose` / `onerror` / `onmessage` BEFORE calling `.close()`, else `onclose` re-fires `wsScheduleReconnect`.
 
-8. **Clear `STATE.waiting` on disconnect** — the `status_update` handler must force `STATE.waiting = false` or the sidebar gets stuck in a waiting state.
+8. **NOT_PAIRED state skips auto-reconnect** — instead it polls every 5 sec; the keepalive alarm respects this.
 
-9. **Message replay uses `lastSeenMsgId`** — Service Worker restart clears the in-memory `processedCmds` Set; always track progress via `lastSeenMsgId` to avoid re-executing commands.
+9. **Ed25519 signature payload** — must use `openclaw-control-ui` + `webchat` mode; using `clawtab` or `operator` mode rejects pairing.
 
-10. **Handshake idempotency** — store the `hs_{sessionKey}` flag to `chrome.storage` *before* the API call; delete it on failure to prevent ghost handshake state on SW restart.
+10. **`flash_element` overlay is a singleton** — reuse the single overlay element; reset animation via `animation:none` + `void offsetWidth` to force reflow.
 
-## Storage & State
-
-- All persistent state uses `chrome.storage.local` (config, deviceToken, language preference, handshake flags).
-- Service Worker is ephemeral — in-memory state (`processedCmds` Set, WebSocket instance, `STATE.*`) is lost on SW termination; code must handle cold-start recovery.
+11. **`clear context` ordering** — sidebar must clear `STATE.messages` / `STATE.lastMsgId` BEFORE the `chat.send('/new')` round-trip, otherwise the polling that picks up `/new` plus the re-dispatched handshake gets de-duped against the pre-existing seen-keys set.
 
 ## UI Conventions
 
-- **Two pages**: Config and Chat, toggled by `status_update` messages from the background worker.
-- **Bilingual**: EN/ZH toggle stored in `chrome.storage`. All user-visible strings go through the i18n helper via `data-i18n` attributes.
-- **Icons**: Extension toolbar icon uses PNG for stable states (idle, connected, done) and canvas-drawn colored "C" badges for transient states (orange=connecting, blue=perceiving, purple=thinking, green=acting, red=failed).
-- **Markdown**: Chat messages are rendered via `marked.js` (v15.0.12, bundled in `sidebar/lib/`).
+- **Two pages**: Config and Chat, derived from the reducer's `state.page` field (driven by `status_update` broadcasts).
+- **Bilingual**: EN/ZH toggle persisted in `chrome.storage.local.lang`. All visible strings go through `t(lang, key)` from `i18n.ts`.
+- **Icons**: only `lucide-react` is allowed in UI. Toolbar icon uses PNG for stable states (idle, connected, done) and canvas-drawn coloured "C" badges for transient states (orange=connecting, blue=perceiving, purple=thinking, green=acting, red=failed).
+- **Tooltips on every icon button**: every icon-only control sits inside `<IconButton tooltip={...}>`. The shared component requires the `tooltip` prop. The language toggle's tooltip is dynamic — it shows the **target** language (`Switch to 中文` / `Switch to English`).
+- **Markdown**: chat messages render through `marked` + `sanitizeHtml`. Component styles live in `.md-bubble` / `.md-bubble-user` (Tailwind `@layer components` in `styles.css`).
+
+## Docs-First Authoring
+
+Before any code change (including typos), update [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) and/or [docs/TECH_DESIGN.md](docs/TECH_DESIGN.md). REQUIREMENTS = "what + why" (user-visible behavior, decisions). TECH_DESIGN = "how + why this approach" (architecture, invariants, trade-offs). README is part of the doc set when toolchain / setup / structure / headline features change.
 
 ## After Every Change: Push and Share Download Link
 
@@ -109,7 +96,9 @@ git push origin main
 Download link (always points to latest main):
 **https://github.com/parksben/clawtab/archive/refs/heads/main.zip**
 
+The user has to run `pnpm install && pnpm build` after unzipping (we no longer ship a pre-built `dist/`).
+
 ## Protocol Reference
 
-See `AGENT_PROTOCOL.md` for the full `clawtab_cmd`/`clawtab_result` message format.
-See `DEVELOPMENT.md` (Chinese) for extended debugging notes and architecture diagrams.
+- [AGENT_PROTOCOL.md](AGENT_PROTOCOL.md) — full `clawtab_cmd` / `clawtab_result` message format
+- [DEVELOPMENT.md](DEVELOPMENT.md) — extended Chinese debugging notes (pre-migration; some sections refer to the old vanilla layout, but the diagrams are still accurate at the protocol level)
