@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> ⚠️ **Migration in progress**: the codebase is being migrated from pure vanilla JS to React + TypeScript + Tailwind + Vite across 10 phases. See `docs/TECH_DESIGN.md` → "迁移路线" for the roadmap and current phase. Until Phase 7 lands, the root-level vanilla files below **still work verbatim** via `Load unpacked` on the repo root. From Phase 1 on there is also a `dist/` produced by `pnpm build` that is equivalent.
+
 ## Project Overview
 
 ClawTab is a Chrome Extension (Manifest V3) that connects a browser to an OpenClaw Gateway, enabling AI agents to observe and control browser tabs. It is **pure vanilla JavaScript** — no build tools, no npm, no TypeScript, no framework.

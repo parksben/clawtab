@@ -199,3 +199,69 @@ sidebar 拿到 bundle 后由 `formatDiagBundle()` 拼成可读纯文本，浏览
 ## 已知坑（汇总自 DEVELOPMENT.md）
 
 参见根目录 `CLAUDE.md` 的 "Key Pitfalls" 段，覆盖了 DOM 缓存、握手幂等、`status_update` 状态清理、Ed25519 payload 等关键点。
+
+---
+
+## 迁移路线：React + TypeScript + Tailwind + Vite
+
+项目当前是纯原生 JS（~4500 LOC，无构建步骤）。这一节记录向 React/TS/Tailwind/Vite 技术栈迁移的 **10 阶段路线图**，以及每个阶段的范围与退出条件。
+
+### 关键原则
+
+1. **用户不可见变更之前的每一步都是 docs-first**：先更 `REQUIREMENTS.md` / `TECH_DESIGN.md`，后改代码。
+2. **每个 phase 结束都是可加载、可运行的扩展**：
+   - Phase 1 起 `pnpm build` 产出 `dist/`，`Load unpacked → dist/` 可用。
+   - 根目录旧文件**一直保留到 Phase 7**，所以老方式（直接 Load unpacked 仓库根目录）在迁移中途仍然能跑，GitHub zip 下载链接不会断。
+3. **关键不变式原样搬运**（CLAUDE.md 的 Key Pitfalls 与本文件前面小节的设计）：
+   - 握手三层防护（进程锁 + storage 标记 + 进入后再检查），错误时绝不删标记。
+   - `connect.ok` 单 gate `!alreadySent && !lastSeenMsgId`，`isNewSession=true` 分支不清握手标记。
+   - `fetchHistory` 的 `msgKey` 去重（id 优先 + content fallback）。
+   - `isHiddenInfraMsg` 过滤 `/new`。
+   - 链接通过 `chrome.tabs.create` 打开，不能仅靠 `target="_blank"`。
+   - SW 易失性 + `chrome.storage.local` 持久化策略。
+4. **Lucide-only**：用 `lucide-react` 命名导入，禁止混入其他 icon 库。
+5. **小步提交**：每个 phase 一次 `git push`，README 的 zip 下载链接随时可用。
+
+### 技术栈决定
+
+- **Vite 6** + `@vitejs/plugin-react` + **`@crxjs/vite-plugin@^2.0.0-beta`**：目前唯一能正确处理 MV3 Service Worker `type:"module"` + sidepanel 的构建方案，替代品（rollup-plugin-chrome-extension）已停维护。
+- **React 19** + **TypeScript 5.6 strict**。
+- **Tailwind v3**（不上 v4 —— 扩展场景里 v4 的 CSS layer 语义仍有 quirks）。
+- **lucide-react**：tree-shake 友好，命名导入。
+- **状态管理**：`useReducer` + 一个 Context 就够，不上 Zustand/Redux —— state 拆下来约 8–12 个 action。
+- **Tooltip**：自研 ~50 行（`position:fixed` + `getBoundingClientRect()` + 边缘翻转），不引 radix-ui（sidepanel 包体敏感）。
+- **测试**：只对 `reducer.ts` / `msgKey` / `isHiddenInfraMsg` / `safeSerialize` 这几个纯函数加 Vitest，防止"握手重复"那类 bug 回归。不写组件测试。
+
+### 10 阶段节奏
+
+| Phase | 范围 | 退出条件 |
+|-------|------|----------|
+| 0 | **docs-only**：本路线图写入 `TECH_DESIGN.md`，`CLAUDE.md` 加一段"迁移进行中"提示。 | 代码零改动。 |
+| 1 | **脚手架**：`package.json` / `tsconfig.json` / `vite.config.ts` / `tailwind.config.ts` / `src/manifest.ts` / `.gitignore`。`@crxjs` 指向**现有**的 `background.js` / `sidebar/*` / `content/*` / `shared/*`。 | `pnpm build` 产出 `dist/`，Load unpacked `dist/` 行为 = Load unpacked 根目录。 |
+| 2 | **`content.js` + `shared/types` 迁 TS**。老 `shared/icons.js` 仍通过 `publicDir` 拷给旧 sidebar。 | content 脚本是 `.ts`，其他不变，扩展行为不变。 |
+| 3 | **background.js 模块化迁 TS**（最高风险）。按现有 SECTION 切文件，握手三层防护原样保留。 | 12 个测试流程全部通过：冷连接、WS 掉线重连、SW 手动 Terminate、`/new`、配对、日志导出、拾取+发送、任务取消、agent 切换、SW 重启冷启动、Gateway 掉线恢复、连续快速 connect/disconnect。 |
+| 4 | **接入 Tailwind**，老 `sidebar.css` 仍生效。 | 产物体积变化可忽略。 |
+| 5 | **React 外壳接管页面路由**，页面内容暂用 `dangerouslySetInnerHTML` 保留旧 HTML，`status_update` 驱动 `Config \| Pairing \| Chat` 页面切换走 `useReducer`。 | sidebar 挂载方式变了但看起来一样。 |
+| 6 | **ChatPage 组件化**：`ChatHeader` / `MessageList` / `MessageBubble` / `ToolRow` / `ThinkingIndicator` / `EmptyState` / `TaskBar` / `Lightbox`。`fetchHistory` + `msgKey` dedup + `pendingEchoContent` echo-replace 原样搬进 reducer，配 Vitest。 | 聊天、去重、链接新标签打开全部 OK。 |
+| 7 | **ConfigPage + InputArea + 拾取 + 清空上下文 + 诊断**组件化，**删除**老 `sidebar/` + `shared/icons.js` + 根目录 `background.js` / `manifest.json` / `content/`。根目录只留 docs + 构建配置。 | Phase 3 的 12 项测试再跑一遍。 |
+| 8 | **UI 改进**：Tooltip primitive、所有 icon-only 按钮加 tooltip、语言切换改 Globe 图标+动态目标语言 tooltip。 | REQUIREMENTS.md 记录按钮清单与文案。 |
+| 9 | **收尾**：`CLAUDE.md` 里"旧工作流"注释删掉，README 改成 `pnpm build --watch`，包体审计（期望 sidebar JS <300 KB）。 | 迁移结束。 |
+
+### 本阶段（Phase 0）就是这一节本身
+
+这一段写入即完成 Phase 0，不改动任何代码文件。下一 commit（Phase 1）加构建工具链，**不动任何现有业务代码**。
+
+### 关于 zip 下载链接
+
+整个迁移过程中 `https://github.com/parksben/clawtab/archive/refs/heads/main.zip` **始终可用**：
+- Phase 1–6：根目录仍然是一份完整、独立的老 JS 扩展，可直接 Load unpacked。
+- Phase 7 之后：zip 解压后需要 `pnpm install && pnpm build`，然后 Load unpacked 解压出的 `dist/`。Phase 7 的 commit message + README 会明确这一切换点。
+
+### 风险与开放问题
+
+1. **`chrome.sidePanel` HMR 未必稳定**：Vite 的 HMR WebSocket 可能跟 sidepanel 的 CSP + @crxjs 注入的桥 iframe 合不来。退路：`vite build --watch` + 手动 reload 扩展，仍是一次点击。
+2. **SW module quirks**：`type: "module"` 下 Chrome 对相对路径和 `import()` 很敏感，所有 SW 代码只用 top-level 静态 import。
+3. **Tailwind 动态 class 被 purge**：所有条件 class 必须走 `clsx(...)`，禁止字符串拼接（如 `\`bg-${color}\``）。
+4. **content.js 不能用 Tailwind**：host 页面没加载 Tailwind CSS，`content/` 下的所有样式必须保留为 inline `cssText` 或 `element.style.*`。
+5. **lucide-react 必须命名导入** `{ Globe }`，禁 `import * as Icons`，否则 tree-shake 失效。
+6. **IndexedDB 数据库名 `clawtab-v2` 不能改**：否则现有用户的 Ed25519 设备密钥丢失、会被迫重新配对。
