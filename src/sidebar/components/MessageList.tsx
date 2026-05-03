@@ -71,7 +71,10 @@ export function MessageList({
   }
 
   return (
-    <div ref={containerRef} className="flex h-full flex-col gap-2 overflow-y-auto px-3 py-3">
+    <div
+      ref={containerRef}
+      className="flex h-full min-w-0 flex-col gap-2 overflow-x-hidden overflow-y-auto px-3 py-3"
+    >
       {messages.map((m, i) => (
         <MessageBubble key={(m.id ?? 'idx-') + i} msg={m} />
       ))}

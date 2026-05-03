@@ -71,7 +71,7 @@ These are paid-for in production. Before touching the relevant code, re-read the
 
 5. **Link clicks open new tabs via `chrome.tabs.create`** — `target="_blank"` alone is unreliable inside Chrome's sidepanel iframe. `MessageList.tsx` registers a delegated click handler that calls `chrome.tabs.create({ url, active: true })` and `preventDefault`s. `markdown.ts:sanitizeHtml` also rewrites every `<a>` to `target="_blank" rel="noopener noreferrer"` as defense in depth.
 
-6. **Service Worker is ephemeral** — in-memory `S.*` is wiped on SW termination. Anything that must survive sits in `chrome.storage.local`: `gatewayUrl/gatewayToken/browserName`, `deviceToken`, `manualDisconnect`, `hs_<sessionKey>`, `lsid_<sessionKey>`, `diag_logs`. The diagnostic logger calls `loadLogs()` first thing in `init()` to merge with any boot-window entries.
+6. **Service Worker is ephemeral** — in-memory `S.*` is wiped on SW termination. Anything that must survive sits in `chrome.storage.local`: `gatewayUrl/gatewayToken/browserName`, `deviceToken`, `manualDisconnect`, `hs_<sessionKey>`, `lsid_<sessionKey>`, `hidden_<sessionKey>`, `diag_logs`. The diagnostic logger calls `loadLogs()` first thing in `init()` to merge with any boot-window entries.
 
 7. **`wsDisconnect` must null WS callbacks** — clear `onclose` / `onerror` / `onmessage` BEFORE calling `.close()`, else `onclose` re-fires `wsScheduleReconnect`.
 
@@ -79,16 +79,26 @@ These are paid-for in production. Before touching the relevant code, re-read the
 
 9. **Ed25519 signature payload** — must use `openclaw-control-ui` + `webchat` mode; using `clawtab` or `operator` mode rejects pairing.
 
-10. **`flash_element` overlay is a singleton** — reuse the single overlay element; reset animation via `animation:none` + `void offsetWidth` to force reflow.
+10. **Unified pick / flash overlay is a singleton** — pick-mode hover uses a content-script overlay DIV `#__clawtab_overlay__` (lazy-created in [src/content/index.ts](src/content/index.ts), positioned in document coordinates so it scrolls with the page). The `flash_element` animation uses a separate, parallel singleton injected by background via `chrome.scripting.executeScript({world:'MAIN'})` (overlay id `#__ct_flash_ov__`, keyframe `@keyframes __ct_flash_ov`). After the flash animation finishes, hide via `display:none` — **do NOT** reset `animation` to `'none'`, that reverts opacity to the default 1 and the overlay re-appears forever (this was the historical bug). To re-trigger the animation: `display:block` → set rect → `animation:none` + `void offsetWidth` + reapply keyframe animation.
 
 11. **`clear context` ordering** — sidebar must clear `STATE.messages` / `STATE.lastMsgId` BEFORE the `chat.send('/new')` round-trip, otherwise the polling that picks up `/new` plus the re-dispatched handshake gets de-duped against the pre-existing seen-keys set.
+
+12. **`hiddenMsgKeys` is load-bearing for "clear context"** — Gateway preserves `chat.history` through `/new`, so the reducer captures every visible `msgKey` into `state.hiddenMsgKeys` on `CLEAR_CONTEXT` and `HYDRATE_HISTORY` filters against it. Without this, the next 1–3 s polling tick re-hydrates the cleared chat and the UI snaps back to its pre-clear state. The set resets on agent / channel switch (different sessions can't share blocked keys).
+
+13. **`hiddenMsgKeys` must persist across sidepanel reopens** — `hiddenMsgKeys` is also written to `chrome.storage.local["hidden_<sessionKey>"]` after every change (App.tsx debounced ~250 ms; `handleClearContext` flushes synchronously to survive an immediate sidepanel close). On bootstrap, when `channelName` becomes known, App dispatches `HYDRATE_HIDDEN_KEYS` to load the array back. **The polling effect refuses to run until `state.hiddenKeysHydrated === true`** — without this gate a fast first tick would re-surface the freshly-cleared messages before the blocklist arrives. `HYDRATE_HISTORY` is also a no-op until hydrated, as belt-and-braces.
+
+14. **Local-echo replacement is keyed by `localId`, not "first local- in messages"** — `state.pendingEchoes` is `Map<localId, content>`, not a single string. When `HYDRATE_HISTORY` finds a server-side user message whose text matches a pending entry, it replaces the placeholder with that exact `localId`. The earlier "first local-" approach broke when the user sent two messages in quick succession before polling caught up: msg #1's bubble would adopt msg #2's text. The reducer test "two-message rapid send" pins this — keep it green.
+
+15. **Filter `role:"toolResult"` and `provenance.kind === "inter_session"` user msgs** — Gateway's `chat.history` returns the agent's own tool-call results (`web_fetch`, `sessions_send`, `sessions_history` JSON dumps) as `role:"toolResult"`, plus user-role echoes from inter-session `sessions_send` calls (clawtab_cmd bouncing back). Both are filtered in `HYDRATE_HISTORY` before they hit `state.messages`, **and** in `selectVisibleMessages` as belt-and-braces (so direct construction of state in tests still works). Without these filters the chat list fills with JSON walls and looped `clawtab_cmd` icon rows the moment the agent kicks off any tool.
+
+16. **60s "did not respond" timer is reset on activity, not on send** — `App.tsx` owns a single effect keyed on `[state.waiting, state.messages.length, state.loop?.status]`. Any new visible message OR loop transition (perceiving / thinking / acting) clears + restarts the 60s. Terminal message → reducer flips `waiting=false` → effect tears it down. The earlier "set timer at send time, never reset" version fired a false "Agent did not respond" mid-perceive because intermediate `clawtab_cmd` JSON blocks have no terminal text.
 
 ## UI Conventions
 
 - **Two pages**: Config and Chat, derived from the reducer's `state.page` field (driven by `status_update` broadcasts).
 - **Bilingual**: EN/ZH toggle persisted in `chrome.storage.local.lang`. All visible strings go through `t(lang, key)` from `i18n.ts`.
 - **Icons**: only `lucide-react` is allowed in UI. Toolbar icon uses PNG for stable states (idle, connected, done) and canvas-drawn coloured "C" badges for transient states (orange=connecting, blue=perceiving, purple=thinking, green=acting, red=failed).
-- **Tooltips on every icon button**: every icon-only control sits inside `<IconButton tooltip={...}>`. The shared component requires the `tooltip` prop. The language toggle's tooltip is dynamic — it shows the **target** language (`Switch to 中文` / `Switch to English`).
+- **Tooltips on every icon button**: every icon-only control sits inside `<IconButton tooltip={...}>`. The shared component requires the `tooltip` prop. The language toggle's tooltip is dynamic and **always written in the current UI language** (en → "Switch to Chinese", zh → "切换到英文") — never mix languages in one tooltip.
 - **Markdown**: chat messages render through `marked` + `sanitizeHtml`. Component styles live in `.md-bubble` / `.md-bubble-user` (Tailwind `@layer components` in `styles.css`).
 
 ## Docs-First Authoring

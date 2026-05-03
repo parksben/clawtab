@@ -125,27 +125,29 @@ export function MessageBubble({ msg }: { msg: ChatMessage }) {
   return (
     <div
       className={
-        'flex ' +
+        'flex w-full min-w-0 ' +
         (role === 'user'
           ? 'flex-col items-end self-end'
-          : 'flex-col items-start self-start')
+          : 'flex-col items-start self-stretch')
       }
       data-local-echo={msg.id?.startsWith('local-') ? '1' : undefined}
     >
       {cleaned ? (
-        <div
-          className={
-            'max-w-[85%] rounded-2xl px-3 py-2 text-[12.5px] ' +
-            (role === 'user'
-              ? 'bg-brand text-white'
-              : 'border border-slate-200 bg-white text-slate-900')
-          }
-        >
-          <div
-            className={'md-bubble' + (role === 'user' ? ' md-bubble-user' : '')}
-            dangerouslySetInnerHTML={{ __html: renderMarkdown(cleaned) }}
-          />
-        </div>
+        role === 'user' ? (
+          <div className="max-w-[calc(100%-120px)] min-w-0 rounded-2xl bg-brand px-3 py-2 text-[12.5px] text-white">
+            <div
+              className="md-bubble md-bubble-user"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(cleaned) }}
+            />
+          </div>
+        ) : (
+          <div className="w-full min-w-0 px-1 py-1 text-[12.5px] text-slate-900">
+            <div
+              className="md-bubble"
+              dangerouslySetInnerHTML={{ __html: renderMarkdown(cleaned) }}
+            />
+          </div>
+        )
       ) : null}
       {toolCalls.map((tc, i) => {
         const s = summariseToolCall(tc);

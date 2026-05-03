@@ -1,35 +1,22 @@
-import { Download, Power, Trash2 } from 'lucide-react';
+import { Download, Power } from 'lucide-react';
 import { useState } from 'react';
 import { IconButton } from './IconButton';
 import { LangBadge } from './LangBadge';
 import { Tooltip } from './Tooltip';
 import { t, type Lang } from '../i18n';
 import { bg, clog } from '../lib/messages';
-import type { DiagBundle } from '@/shared/types/state';
+import type { ChatMessage } from '@/shared/types/protocol';
 
-function formatDiag(bundle: DiagBundle): string {
-  const date = new Date(bundle.generatedAt).toISOString();
+function chatHistoryToJsonl(
+  meta: { sessionKey: string; agent: string; browserId: string; exportedAt: string },
+  messages: ChatMessage[],
+): string {
   const lines: string[] = [];
-  lines.push(`ClawTab Diagnostic Report`);
-  lines.push(`Generated: ${date}`);
-  lines.push(`Version: ${bundle.version}`);
-  lines.push('');
-  lines.push('=== State ===');
-  lines.push(JSON.stringify(bundle.state, null, 2));
-  lines.push('');
-  lines.push('=== Config (redacted) ===');
-  lines.push(JSON.stringify(bundle.config, null, 2));
-  lines.push('');
-  lines.push(`=== Logs (${bundle.logs.length}) ===`);
-  for (const l of bundle.logs) {
-    const tstamp = new Date(l.t).toISOString();
-    const data = l.data ? ` | ${l.data}` : '';
-    lines.push(`[${tstamp}] [${l.level}] [${l.src}] ${l.msg}${data}`);
+  lines.push(JSON.stringify({ kind: 'session_meta', ...meta }));
+  for (const m of messages) {
+    lines.push(JSON.stringify({ kind: 'message', ...m }));
   }
-  lines.push('');
-  lines.push(`=== Chat history (last ${bundle.chatHistory.length}) ===`);
-  lines.push(JSON.stringify(bundle.chatHistory, null, 2));
-  return lines.join('\n');
+  return lines.join('\n') + '\n';
 }
 
 export function ChatHeader({
@@ -41,6 +28,7 @@ export function ChatHeader({
   reconnecting,
   onToggleLang,
   onToast,
+  channelName,
 }: {
   lang: Lang;
   agent: string;
@@ -50,6 +38,7 @@ export function ChatHeader({
   reconnecting: boolean;
   onToggleLang: () => void;
   onToast: (text: string, error?: boolean) => void;
+  channelName: string;
 }) {
   const [exporting, setExporting] = useState(false);
 
@@ -59,41 +48,35 @@ export function ChatHeader({
       ? t(lang, 'reconnecting')
       : t(lang, 'disconnected');
 
-  const doExport = async () => {
+  const doExportSession = async () => {
     if (exporting) return;
     setExporting(true);
     try {
-      const res = await bg.diagGet();
-      if (!('ok' in res) || res.ok !== true) {
+      const sessionKey = `agent:${agent}:clawtab-${channelName}`;
+      const res = await bg.fetchHistory(sessionKey);
+      if (!res.ok) {
         onToast(t(lang, 'exportFailed'), true);
         return;
       }
-      const text = formatDiag(res);
-      const stamp = new Date(res.generatedAt)
-        .toISOString()
-        .replace(/[:.]/g, '-')
-        .slice(0, 19);
+      const exportedAt = new Date().toISOString();
+      const text = chatHistoryToJsonl(
+        { sessionKey, agent, browserId: channelName, exportedAt },
+        res.messages || [],
+      );
+      const stamp = exportedAt.replace(/[:.]/g, '-').slice(0, 19);
       const a = Object.assign(document.createElement('a'), {
-        href: URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' })),
-        download: `clawtab-diag-${stamp}.txt`,
+        href: URL.createObjectURL(
+          new Blob([text], { type: 'application/x-ndjson;charset=utf-8' }),
+        ),
+        download: `clawtab-session-${stamp}.jsonl`,
       });
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
     } catch (e) {
-      clog('error', 'export diag failed', { error: (e as Error).message });
+      clog('error', 'export session failed', { error: (e as Error).message });
       onToast(t(lang, 'exportFailed'), true);
     } finally {
       setExporting(false);
-    }
-  };
-
-  const doClearLogs = async () => {
-    if (!confirm(t(lang, 'clearLogsConfirm'))) return;
-    try {
-      await bg.logClear();
-      onToast(t(lang, 'logsCleared'));
-    } catch (e) {
-      clog('error', 'clearLogs failed', { error: (e as Error).message });
     }
   };
 
@@ -125,11 +108,14 @@ export function ChatHeader({
         />
         <span className="text-[11.5px] text-slate-500">{statusText}</span>
       </div>
-      <IconButton tooltip={t(lang, 'exportLogs')} variant="ghost" size="sm" onClick={doExport}>
+      <IconButton
+        tooltip={t(lang, 'exportSession')}
+        variant="ghost"
+        size="sm"
+        disabled={!connected || exporting}
+        onClick={doExportSession}
+      >
         <Download size={14} />
-      </IconButton>
-      <IconButton tooltip={t(lang, 'clearLogs')} variant="ghost" size="sm" onClick={doClearLogs}>
-        <Trash2 size={14} />
       </IconButton>
       <IconButton
         tooltip={t(lang, 'langSwitchTo')}

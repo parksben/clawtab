@@ -94,6 +94,7 @@ export type ContentScrollRequest = { type: 'scroll'; x?: number; y?: number };
 export type ContentEvalRequest = { type: 'eval'; code: string };
 export type ContentEnterPickModeRequest = { type: 'enter_pick_mode' };
 export type ContentExitPickModeRequest = { type: 'exit_pick_mode' };
+export type ContentFlashElementRequest = { type: 'flash_element'; selector: string };
 
 // content → bg
 export type ElementPickedCaptureRequest = {

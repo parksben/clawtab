@@ -56,6 +56,7 @@ export const STRINGS = {
 
     // ── Diagnostics ──
     exportLogs: 'Export logs',
+    exportSession: 'Export session',
     clearLogs: 'Clear logs',
     clearLogsConfirm: 'Clear all diagnostic logs on this browser?',
     logsCleared: 'Logs cleared',
@@ -66,8 +67,8 @@ export const STRINGS = {
     clearContextConfirm: 'Clear this conversation and reset the agent context?',
     clearContextFailed: 'Failed to reset context',
 
-    // ── Language switch tooltip (shows the TARGET language) ──
-    langSwitchTo: 'Switch to 中文',
+    // ── Language switch tooltip — written in the CURRENT UI language. ──
+    langSwitchTo: 'Switch to Chinese',
   },
   zh: {
     connectTitle: '连接 OpenClaw',
@@ -117,6 +118,7 @@ export const STRINGS = {
     loopCancelled: '已取消',
 
     exportLogs: '导出日志',
+    exportSession: '导出会话记录',
     clearLogs: '清除日志',
     clearLogsConfirm: '确定要清除浏览器里所有诊断日志吗？',
     logsCleared: '日志已清除',
@@ -126,7 +128,7 @@ export const STRINGS = {
     clearContextConfirm: '清空当前对话并重置 Agent 上下文？',
     clearContextFailed: '清空上下文失败',
 
-    langSwitchTo: 'Switch to English',
+    langSwitchTo: '切换到英文',
   },
 } as const;
 

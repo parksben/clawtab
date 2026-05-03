@@ -150,13 +150,26 @@ export interface ClawtabResult {
 
 // Chat message as returned by the Gateway's chat.history endpoint. Uses loose
 // typing because server shape varies slightly (blocks / content / id).
+//
+// `role` includes "toolResult" — those are tool-call return values (web_fetch,
+// sessions_send, sessions_history dumps) that the sidebar filters out.
+//
+// `provenance.kind === "inter_session"` marks user messages that were echoed
+// back from another session via the agent's `sessions_send` tool. These are
+// internal command bounces and must not render in the chat list.
 export interface ChatMessage {
   id?: string;
-  role: 'user' | 'assistant' | 'system' | string;
+  role: 'user' | 'assistant' | 'system' | 'toolResult' | string;
   content?: string | Array<{ type: string; text?: string }>;
   blocks?: Array<{ type: string; text?: string }>;
   timestamp?: number;
   ts?: number;
   createdAt?: number;
   attachments?: unknown[];
+  provenance?: {
+    kind?: string;
+    sourceSessionKey?: string;
+    sourceChannel?: string;
+    sourceTool?: string;
+  };
 }

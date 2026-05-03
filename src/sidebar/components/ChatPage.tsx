@@ -28,6 +28,7 @@ export function ChatPage({
   onSend,
   onRemoveAttachment,
   onToast,
+  channelName,
 }: {
   lang: Lang;
   onToggleLang: () => void;
@@ -48,6 +49,7 @@ export function ChatPage({
   onSend: (text: string, sentAttachments: Attachment[]) => void;
   onRemoveAttachment: (index: number) => void;
   onToast: (text: string, error?: boolean) => void;
+  channelName: string;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
 
@@ -72,6 +74,7 @@ export function ChatPage({
         reconnecting={reconnecting}
         onToggleLang={onToggleLang}
         onToast={onToast}
+        channelName={channelName}
       />
       <TaskBar lang={lang} loop={loop} onThumbClick={setLightbox} />
       <div className="flex-1 overflow-hidden">

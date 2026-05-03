@@ -38,6 +38,11 @@
      nested tag styles don't pollute other surfaces. */
   .md-bubble {
     @apply leading-relaxed break-words whitespace-normal;
+    /* Force breaking of long unbreakable strings (URLs, hashes, etc.) so
+       they never push the bubble wider than its container. */
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    min-width: 0;
   }
   .md-bubble > *:first-child { margin-top: 0; }
   .md-bubble > *:last-child  { margin-bottom: 0; }
@@ -63,8 +68,14 @@
     border-radius: 6px;
     padding: 8px 10px;
     font-size: 11px;
-    overflow-x: auto;
     margin: 0.4em 0;
+    /* Wrap inside the code block — sidebar is too narrow for horizontal
+       scroll, and we never want the bubble to be pushed wider than its
+       container by an overlong code line. */
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    max-width: 100%;
   }
   .md-bubble pre code {
     background: transparent;

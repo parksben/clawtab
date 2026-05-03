@@ -3,6 +3,7 @@ import {
   isValidElement,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -49,12 +50,11 @@ interface Coords {
 }
 
 const TOOLTIP_MARGIN = 6;
+const VIEWPORT_PAD = 6;
 
 function computePosition(rect: DOMRect, preferred: Side): Coords {
   const vh = window.innerHeight;
   const vw = window.innerWidth;
-  // Conservative bubble size guesses for flip detection — actual bubble
-  // resizes to its content but flips will only fire when really needed.
   const bubbleH = 32;
   const bubbleW = 120;
 
@@ -96,6 +96,50 @@ function computePosition(rect: DOMRect, preferred: Side): Coords {
   }
 }
 
+function TooltipBubble({
+  id,
+  label,
+  coords,
+}: {
+  id: string;
+  label: ReactNode;
+  coords: Coords;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  const bubbleStyle: CSSProperties = {
+    left: coords.x,
+    top: coords.y,
+    transform: coords.transform,
+  };
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = window.innerWidth;
+    if (r.right > vw - VIEWPORT_PAD) {
+      el.style.left = `${vw - VIEWPORT_PAD - r.width}px`;
+      el.style.transform = coords.side === 'top' ? 'translateY(-100%)' : '';
+    } else if (r.left < VIEWPORT_PAD) {
+      el.style.left = `${VIEWPORT_PAD}px`;
+      el.style.transform = coords.side === 'top' ? 'translateY(-100%)' : '';
+    }
+  }, [coords]);
+
+  return (
+    <div
+      ref={ref}
+      role="tooltip"
+      id={id}
+      className="pointer-events-none fixed z-[9999] select-none whitespace-nowrap rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white shadow-lg shadow-black/15 ct-tooltip-bubble"
+      style={bubbleStyle}
+    >
+      {label}
+    </div>
+  );
+}
+
 export function Tooltip({
   label,
   children,
@@ -109,7 +153,6 @@ export function Tooltip({
   const showTimer = useRef<number | null>(null);
   const id = useId();
 
-  // Clear the show timer if the component unmounts mid-delay.
   useEffect(
     () => () => {
       if (showTimer.current) clearTimeout(showTimer.current);
@@ -141,27 +184,15 @@ export function Tooltip({
     setOpen(false);
   };
 
-  // Forward listeners to the trigger so callers can still attach their own
-  // mouse/focus handlers — we wrap, we don't replace.
   const childProps = children.props;
   const trigger = cloneElement(children, {
     'aria-describedby': open ? id : undefined,
   } as Record<string, unknown>);
 
-  const bubbleStyle: CSSProperties = coords
-    ? {
-        left: coords.x,
-        top: coords.y,
-        transform: coords.transform,
-      }
-    : {};
-
   return (
     <>
       <span
         ref={triggerRef}
-        // `inline-flex` keeps the trigger box hugging the child (button),
-        // doesn't add layout space.
         className="inline-flex"
         onMouseEnter={(e) => {
           show();
@@ -184,14 +215,7 @@ export function Tooltip({
       </span>
       {open && coords
         ? createPortal(
-            <div
-              role="tooltip"
-              id={id}
-              className="pointer-events-none fixed z-[9999] max-w-[240px] select-none rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white shadow-lg shadow-black/15 ct-tooltip-bubble"
-              style={bubbleStyle}
-            >
-              {label}
-            </div>,
+            <TooltipBubble id={id} label={label} coords={coords} />,
             document.body,
           )
         : null}

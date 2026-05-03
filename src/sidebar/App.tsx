@@ -11,6 +11,7 @@ import { Toast } from './components/Toast';
 import { useLang } from './hooks/useLang';
 import { t } from './i18n';
 import { bg, clog } from './lib/messages';
+import { msgKey } from './lib/message-utils';
 import {
   initialState,
   reducer,
@@ -24,8 +25,10 @@ export function App() {
   const pollTimerRef = useRef<number | null>(null);
   const waitingTimerRef = useRef<number | null>(null);
   const inputRefSaver = useRef<() => string>(() => '');
+  const hiddenLoadedForChannel = useRef<string | null>(null);
 
   const sessionKey = () => `agent:${state.selectedAgent}:clawtab-${state.channelName}`;
+  const hiddenStorageKey = (sk: string) => `hidden_${sk}`;
 
   // ── bootstrap ──
   useEffect(() => {
@@ -126,6 +129,48 @@ export function App() {
     return () => chrome.runtime.onMessage.removeListener(handler);
   }, [state.attachments]);
 
+  // ── load hiddenMsgKeys from storage when channel becomes known ──
+  // Must complete before the polling effect lets HYDRATE_HISTORY through —
+  // otherwise a fast first tick re-hydrates freshly cleared messages.
+  useEffect(() => {
+    if (!state.wsConnected || !state.channelName) return;
+    const sk = sessionKey();
+    if (hiddenLoadedForChannel.current === sk) return;
+    hiddenLoadedForChannel.current = sk;
+    (async () => {
+      try {
+        const stored = (await chrome.storage.local.get(hiddenStorageKey(sk))) as Record<
+          string,
+          unknown
+        >;
+        const raw = stored[hiddenStorageKey(sk)];
+        const keys = Array.isArray(raw) ? (raw as string[]) : [];
+        dispatch({ type: 'HYDRATE_HIDDEN_KEYS', keys });
+      } catch (e) {
+        clog('warn', 'hiddenKeys load failed', { error: (e as Error).message });
+        dispatch({ type: 'HYDRATE_HIDDEN_KEYS', keys: [] });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.wsConnected, state.channelName, state.selectedAgent]);
+
+  // ── persist hiddenMsgKeys on every change (debounced ~250ms) ──
+  useEffect(() => {
+    if (!state.hiddenKeysHydrated || !state.channelName) return;
+    const sk = sessionKey();
+    const handle = window.setTimeout(() => {
+      const arr = Array.from(state.hiddenMsgKeys);
+      chrome.storage.local.set({ [hiddenStorageKey(sk)]: arr }).catch(() => {});
+    }, 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    state.hiddenMsgKeys,
+    state.hiddenKeysHydrated,
+    state.channelName,
+    state.selectedAgent,
+  ]);
+
   // ── polling loop ──
   const runFetchHistory = useCallback(async () => {
     if (!state.wsConnected || !state.channelName) return;
@@ -142,12 +187,15 @@ export function App() {
   }, [state.wsConnected, state.channelName, state.selectedAgent]);
 
   useEffect(() => {
-    // Start / stop polling based on connection
+    // Start / stop polling based on connection AND blocklist hydration.
+    // Without the hydration gate, a fast first tick would re-surface messages
+    // the user just cleared (storage hasn't loaded yet).
     if (pollTimerRef.current) {
       clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
     if (!state.wsConnected || !state.channelName) return;
+    if (!state.hiddenKeysHydrated) return;
     let cancelled = false;
     const tick = async () => {
       if (cancelled) return;
@@ -161,7 +209,34 @@ export function App() {
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     };
-  }, [state.wsConnected, state.channelName, state.selectedAgent, state.waiting, runFetchHistory]);
+  }, [
+    state.wsConnected,
+    state.channelName,
+    state.selectedAgent,
+    state.waiting,
+    state.hiddenKeysHydrated,
+    runFetchHistory,
+  ]);
+
+  // ── activity-based "Agent did not respond" timer ──
+  // Reset to 60s every time we observe activity: a new visible message OR a
+  // loop-status transition into perceiving/thinking/acting. Cleared once the
+  // reducer flips waiting=false (terminal message arrived).
+  useEffect(() => {
+    if (waitingTimerRef.current) {
+      clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    }
+    if (!state.waiting) return;
+    waitingTimerRef.current = window.setTimeout(() => {
+      dispatch({ type: 'WAITING_TIMEOUT' });
+      dispatch({ type: 'CHAT_ERROR', text: 'Agent did not respond within 60s' });
+    }, 60_000);
+    return () => {
+      if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
+      waitingTimerRef.current = null;
+    };
+  }, [state.waiting, state.messages.length, state.loop?.status]);
 
   // ── actions ──
   const handleSend = async (text: string, sentAttachments: Attachment[]) => {
@@ -202,11 +277,9 @@ export function App() {
         return;
       }
       dispatch({ type: 'SEND_OK' });
-      if (waitingTimerRef.current) clearTimeout(waitingTimerRef.current);
-      waitingTimerRef.current = window.setTimeout(() => {
-        dispatch({ type: 'WAITING_TIMEOUT' });
-        dispatch({ type: 'CHAT_ERROR', text: 'Agent did not respond within 60s' });
-      }, 60_000);
+      // The 60s "did not respond" timer is owned by an effect that watches
+      // state.waiting / state.messages.length / state.loop?.status — every new
+      // message or loop transition resets it. We do not start it here.
     } catch (e) {
       dispatch({ type: 'SEND_FAILED', error: (e as Error).message });
     }
@@ -228,7 +301,24 @@ export function App() {
   const handleClearContext = async () => {
     if (!state.wsConnected) return;
     if (!confirm(t(lang, 'clearContextConfirm'))) return;
+    // Snapshot the soon-to-be-hidden keys before dispatch so we can persist
+    // immediately without waiting on the debounced effect (the user might
+    // close the sidepanel within those 250 ms).
+    const hiddenForFlush = new Set(state.hiddenMsgKeys);
+    for (const m of state.messages) hiddenForFlush.add(msgKey(m));
+    for (const content of state.pendingEchoes.values()) {
+      hiddenForFlush.add(`c:user|${content.slice(0, 300)}`);
+    }
     dispatch({ type: 'CLEAR_CONTEXT' });
+    if (state.channelName) {
+      try {
+        await chrome.storage.local.set({
+          [hiddenStorageKey(sessionKey())]: Array.from(hiddenForFlush),
+        });
+      } catch (e) {
+        clog('warn', 'hiddenKeys flush failed', { error: (e as Error).message });
+      }
+    }
     try {
       const res = await bg.resetContext(sessionKey());
       if (!res.ok) {
@@ -281,6 +371,7 @@ export function App() {
           onSend={handleSend}
           onRemoveAttachment={handleRemoveAttachment}
           onToast={handleToast}
+          channelName={state.channelName}
         />
       ) : (
         <ConfigPage

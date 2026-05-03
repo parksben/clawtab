@@ -39,6 +39,20 @@ export function isHiddenInfraMsg(m: ChatMessage): boolean {
   return msgText(m).trim() === '/new';
 }
 
+// Tool-call return values (web_fetch / sessions_send / sessions_history) come
+// back through chat.history with role:"toolResult" and a giant JSON dump in
+// content. They have no value to the chat reader.
+export function isToolResultMsg(m: ChatMessage): boolean {
+  return m.role === 'toolResult';
+}
+
+// When the agent uses sessions_send to write to its own ClawTab session, the
+// gateway echoes the message back as a user-role entry tagged
+// provenance.kind === "inter_session". These are internal command bounces.
+export function isInterSessionEcho(m: ChatMessage): boolean {
+  return m.role === 'user' && m.provenance?.kind === 'inter_session';
+}
+
 export function extractJsonBlock(text: string): Record<string, unknown> | null {
   const m = text.match(/```json\s*([\s\S]*?)```/);
   if (!m) return null;

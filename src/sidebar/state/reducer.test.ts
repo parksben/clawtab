@@ -61,10 +61,11 @@ describe('STATUS_UPDATE page routing', () => {
     expect(s1.pairingDeviceId).toBe('abc');
   });
   it('clears messages + lastMsgId when channelName transitions', () => {
-    const s0 = reducer(initialState(), {
+    let s0 = reducer(initialState(), {
       type: 'STATUS_UPDATE',
       snapshot: emptySnap({ wsConnected: true, browserId: 'chan-a' }),
     });
+    s0 = reducer(s0, { type: 'HYDRATE_HIDDEN_KEYS', keys: [] });
     const withMsgs = reducer(s0, {
       type: 'HYDRATE_HISTORY',
       fetched: [{ id: '1', role: 'user', content: 'hi' }],
@@ -87,8 +88,12 @@ describe('STATUS_UPDATE page routing', () => {
 });
 
 describe('HYDRATE_HISTORY dedup', () => {
+  // Hydrate the persisted blocklist gate so HYDRATE_HISTORY doesn't no-op.
+  const hydrate = (s: ReturnType<typeof initialState>) =>
+    reducer(s, { type: 'HYDRATE_HIDDEN_KEYS', keys: [] });
+
   it('ignores messages already present by id', () => {
-    const s0 = initialState();
+    const s0 = hydrate(initialState());
     const s1 = reducer(s0, {
       type: 'HYDRATE_HISTORY',
       fetched: [{ id: 'x', role: 'user', content: 'hi' }],
@@ -104,7 +109,7 @@ describe('HYDRATE_HISTORY dedup', () => {
   });
   it('dedups messages without id by role+content (handshake case)', () => {
     const HANDSHAKE = '🦾 **ClawTab 已连接**\n浏览器：`x`';
-    const s0 = initialState();
+    const s0 = hydrate(initialState());
     const s1 = reducer(s0, {
       type: 'HYDRATE_HISTORY',
       fetched: [{ role: 'user', content: HANDSHAKE }],
@@ -116,7 +121,7 @@ describe('HYDRATE_HISTORY dedup', () => {
     expect(s2.messages).toHaveLength(1);
   });
   it('dedups within one batch', () => {
-    const s0 = initialState();
+    const s0 = hydrate(initialState());
     const s1 = reducer(s0, {
       type: 'HYDRATE_HISTORY',
       fetched: [
@@ -127,20 +132,177 @@ describe('HYDRATE_HISTORY dedup', () => {
     expect(s1.messages).toHaveLength(1);
   });
   it('replaces local-XXX echo with server version', () => {
-    const s0 = initialState();
+    const s0 = hydrate(initialState());
     const s1 = reducer(s0, {
       type: 'APPEND_LOCAL_ECHO',
       msg: { id: 'local-1', role: 'user', content: 'hey' },
       sentAttachments: [],
     });
-    expect(s1.pendingEchoContent).toBe('hey');
+    expect(s1.pendingEchoes.get('local-1')).toBe('hey');
     const s2 = reducer(s1, {
       type: 'HYDRATE_HISTORY',
       fetched: [{ id: 'server-9', role: 'user', content: 'hey' }],
     });
     expect(s2.messages).toHaveLength(1);
     expect(s2.messages[0].id).toBe('server-9');
-    expect(s2.pendingEchoContent).toBeNull();
+    expect(s2.pendingEchoes.size).toBe(0);
+  });
+  it('two-message rapid send: each local- gets the right server msg', () => {
+    // Reproduces the bug where sending two messages in quick succession (before
+    // polling caught up to the first) caused message #1's bubble to be
+    // overwritten with message #2's text. After the fix, each local-id maps to
+    // exactly its own server message.
+    let s = hydrate(initialState());
+    s = reducer(s, {
+      type: 'APPEND_LOCAL_ECHO',
+      msg: { id: 'local-1', role: 'user', content: 'Hi' },
+      sentAttachments: [],
+    });
+    s = reducer(s, {
+      type: 'APPEND_LOCAL_ECHO',
+      msg: { id: 'local-2', role: 'user', content: 'How are you' },
+      sentAttachments: [],
+    });
+    expect(s.messages.map((m) => m.id)).toEqual(['local-1', 'local-2']);
+    s = reducer(s, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [
+        { id: 'server-1', role: 'user', content: 'Hi' },
+        { id: 'server-2', role: 'user', content: 'How are you' },
+      ],
+    });
+    expect(s.messages.map((m) => m.id)).toEqual(['server-1', 'server-2']);
+    expect(s.pendingEchoes.size).toBe(0);
+  });
+  it('drops toolResult messages before they reach state.messages', () => {
+    const s0 = hydrate(initialState());
+    const s1 = reducer(s0, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [
+        { id: '1', role: 'assistant', content: 'real reply' },
+        {
+          id: '2',
+          role: 'toolResult',
+          content: [{ type: 'text', text: '{"big":"json dump"}' }],
+        },
+      ],
+    });
+    expect(s1.messages).toHaveLength(1);
+    expect(s1.messages[0].id).toBe('1');
+  });
+  it('drops inter_session user echoes', () => {
+    const s0 = hydrate(initialState());
+    const s1 = reducer(s0, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [
+        { id: 'real', role: 'user', content: 'hi' },
+        {
+          id: 'echo',
+          role: 'user',
+          content: '```json\n{"type":"clawtab_cmd","action":"perceive"}\n```',
+          provenance: { kind: 'inter_session', sourceTool: 'sessions_send' },
+        },
+      ],
+    });
+    expect(s1.messages).toHaveLength(1);
+    expect(s1.messages[0].id).toBe('real');
+  });
+  it('returns state unchanged when hiddenKeys not yet hydrated', () => {
+    // Without the gate, a fast first poll would surface freshly-cleared msgs.
+    const s0 = initialState(); // hiddenKeysHydrated=false
+    const s1 = reducer(s0, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [{ id: '1', role: 'user', content: 'hi' }],
+    });
+    expect(s1).toBe(s0); // identity-equal: no work happened
+  });
+});
+
+describe('CLEAR_CONTEXT blocks gateway re-hydration', () => {
+  // Reproduces the bug where clicking "new conversation" briefly emptied
+  // the message list, then the next polling cycle pulled the same messages
+  // back from chat.history (gateway preserves history through `/new`).
+  const HANDSHAKE = '🦾 ClawTab 已连接\n浏览器: x · 11 个标签页';
+  const NEW_HANDSHAKE = '🦾 ClawTab 已连接\n浏览器: x · 8 个标签页';
+  const hydrate = (s: ReturnType<typeof initialState>) =>
+    reducer(s, { type: 'HYDRATE_HIDDEN_KEYS', keys: [] });
+
+  it('drops cleared messages when chat.history replays them', () => {
+    let s = hydrate(initialState());
+    s = reducer(s, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [
+        { id: 'h1', role: 'user', content: HANDSHAKE },
+        { id: 'a1', role: 'assistant', content: 'Got it.' },
+      ],
+    });
+    expect(s.messages).toHaveLength(2);
+
+    s = reducer(s, { type: 'CLEAR_CONTEXT' });
+    expect(s.messages).toEqual([]);
+
+    // Polling tick during/right after the reset returns the same history
+    // plus a brand-new post-clear message — the cleared ones must stay gone.
+    s = reducer(s, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [
+        { id: 'h1', role: 'user', content: HANDSHAKE },
+        { id: 'a1', role: 'assistant', content: 'Got it.' },
+        { id: 'h2', role: 'user', content: NEW_HANDSHAKE },
+        { id: 'a2', role: 'assistant', content: '新会话已开始。' },
+      ],
+    });
+    const ids = s.messages.map((m) => m.id);
+    expect(ids).toEqual(['h2', 'a2']);
+  });
+
+  it('keeps blocklist scoped — channel change wipes it', () => {
+    let s = reducer(initialState(), {
+      type: 'STATUS_UPDATE',
+      snapshot: emptySnap({ wsConnected: true, browserId: 'chan-a' }),
+    });
+    s = hydrate(s);
+    s = reducer(s, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [{ id: 'a1', role: 'user', content: 'hi' }],
+    });
+    s = reducer(s, { type: 'CLEAR_CONTEXT' });
+    expect(s.hiddenMsgKeys.size).toBeGreaterThan(0);
+
+    // Disconnect → reconnect on a different channel; blocklist resets,
+    // hydration flag resets too (App will re-load the new channel's keys).
+    s = reducer(s, {
+      type: 'STATUS_UPDATE',
+      snapshot: emptySnap({ wsConnected: false, browserId: 'chan-a' }),
+    });
+    s = reducer(s, {
+      type: 'STATUS_UPDATE',
+      snapshot: emptySnap({ wsConnected: true, browserId: 'chan-b' }),
+    });
+    expect(s.hiddenMsgKeys.size).toBe(0);
+    expect(s.hiddenKeysHydrated).toBe(false);
+  });
+
+  it('HYDRATE_HIDDEN_KEYS replays blocklist from storage on reopen', () => {
+    // Simulate: user clears, sidepanel closed, reopens; App loads persisted
+    // keys; gateway replays cleared messages — must stay hidden.
+    let s = initialState();
+    s = reducer(s, {
+      type: 'HYDRATE_HIDDEN_KEYS',
+      keys: ['id:h1', 'id:a1'],
+    });
+    expect(s.hiddenKeysHydrated).toBe(true);
+    expect(s.hiddenMsgKeys.has('id:h1')).toBe(true);
+
+    s = reducer(s, {
+      type: 'HYDRATE_HISTORY',
+      fetched: [
+        { id: 'h1', role: 'user', content: HANDSHAKE },
+        { id: 'a1', role: 'assistant', content: 'Got it.' },
+        { id: 'h2', role: 'user', content: NEW_HANDSHAKE },
+      ],
+    });
+    expect(s.messages.map((m) => m.id)).toEqual(['h2']);
   });
 });
 
@@ -183,9 +345,39 @@ describe('selectVisibleMessages', () => {
     );
     expect(v).toHaveLength(1);
   });
+  it('filters role:"toolResult" entries (web_fetch / sessions_send dumps)', () => {
+    const v = selectVisibleMessages(
+      mkState([
+        {
+          id: '1',
+          role: 'toolResult',
+          content: [{ type: 'text', text: '{"runId":"...","status":"timeout"}' }],
+        },
+        { id: '2', role: 'assistant', content: 'real reply' },
+      ]),
+    );
+    expect(v.map((m) => m.id)).toEqual(['2']);
+  });
+  it('filters inter_session user echoes', () => {
+    const v = selectVisibleMessages(
+      mkState([
+        {
+          id: '1',
+          role: 'user',
+          content: '```json\n{"type":"clawtab_cmd","action":"perceive"}\n```',
+          provenance: { kind: 'inter_session', sourceTool: 'sessions_send' },
+        },
+        { id: '2', role: 'user', content: 'hello' },
+      ]),
+    );
+    expect(v.map((m) => m.id)).toEqual(['2']);
+  });
 });
 
 describe('waiting / terminal interplay', () => {
+  const hydrate = (s: ReturnType<typeof initialState>) =>
+    reducer(s, { type: 'HYDRATE_HIDDEN_KEYS', keys: [] });
+
   it('SEND_OK flips waiting=true', () => {
     const s0 = reducer(initialState(), {
       type: 'APPEND_LOCAL_ECHO',
@@ -196,7 +388,7 @@ describe('waiting / terminal interplay', () => {
     expect(s1.waiting).toBe(true);
   });
   it('HYDRATE_HISTORY with a terminal assistant msg clears waiting', () => {
-    let s = initialState();
+    let s = hydrate(initialState());
     s = reducer(s, {
       type: 'APPEND_LOCAL_ECHO',
       msg: { id: 'local-1', role: 'user', content: 'q' },

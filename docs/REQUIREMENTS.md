@@ -19,6 +19,7 @@
 ### 对话与消息
 - 用户在 Chat 页面与 Agent 实时对话，使用 markdown 渲染。
 - 消息列表占据 header / 任务栏 / 输入框之间的剩余高度，**自身可以独立滚动**；新消息自动滚到底，不应把输入框挤出可视区。
+- **消息排版**：消息卡片宽度受容器约束，长链接 / 代码块强制换行，**不允许出现横向滚动**。用户消息保持气泡，靠右对齐，最大宽度 = 容器宽度 − 120px；Agent 回复**不带气泡**，以全宽 Markdown 直接铺满容器。
 - 输入框是单个文本域，**根据内容行数自动撑高**，**自身不出现滚动条**；左右两侧的功能按钮（拾取 / 清空 / 发送）始终与输入框底边对齐。
 - 连接建立后，扩展会自动向会话发一条"握手提示"消息（提示 Agent 加载协议手册），握手消息**只发送一次**：
   - 同一 `sessionKey` 在本地标记为已发送之后，无论 Service Worker 重启、WebSocket 重连、还是 Gateway 报告"全新会话"，都不再重发。
@@ -29,7 +30,16 @@
 - **清空上下文**：输入框左侧（拾取按钮右侧）有一枚"新对话"按钮：
   - 仅在已连接时可用，点击后弹 confirm 防止误触。
   - 点击后：聊天区域立刻清空 → 向 agent 发一条 `/new` 指令（不渲染这条 user message，只用来告诉 agent 重置上下文）→ 本地清掉 `hs_<sessionKey>` 握手标记 → 自动重新发一次协议握手消息，确保 agent 清空后仍然认识 `clawtab_cmd` 协议、工具不失效。
-  - 最终用户看到的效果：聊天从空开始 → 很快出现一条新的"🦾 ClawTab 已连接"握手气泡 → agent 就绪。
+  - **重要**：Gateway 不会因为 `/new` 而删除 `chat.history` 里的旧消息，下一轮 polling 仍会把它们捞回来。客户端必须把"清空时刻可见的所有消息"持久化为隔离标记，并在每次 hydrate 时过滤掉这些消息——**这个隔离必须跨"关闭再打开 sidepanel"持续生效**，否则用户重新打开扩展会看到旧会话又冒出来。
+  - 最终用户看到的效果：聊天从空开始 → 很快出现一条新的"🦾 ClawTab 已连接"握手气泡 → agent 就绪。即使关掉 sidepanel 再打开、甚至重启浏览器，已清空的旧消息也不会再出现。
+
+- **不可见消息**：以下消息出现在 `chat.history` 里，但**不应**渲染到用户聊天列表：
+  - `role:"toolResult"`：agent 自身的工具调用结果（`web_fetch`、`sessions_send`、`sessions_history` 等返回的 JSON dump）。
+  - `provenance.kind === "inter_session"` 的 user 消息：agent 通过 `sessions_send` 跨会话发到自己 ClawTab session 后被 Gateway 回灌的 `clawtab_cmd` 回声。
+  - 仅含 `thinking` 内容块、不含可读 text 的 assistant 消息（agent 内部推理 trace）。
+  - 已有的 `clawtab_result` JSON 块、`/new` 指令也继续过滤。
+
+- **"未响应"提示重置规则**：发出消息后若长时间没看到 agent 任何活动，UI 在底部显示一行红色提示。计时**不是"自发送起 60 秒"**，而是"自最近一次活动起 60 秒"——只要观察到 agent 仍在 perceive / act / 发新消息，超时就被推迟。这避免长任务（多步页面感知）刚开始就被误判为"agent 没响应"。
 
 ### 任务执行
 - Agent 可触发 `perceive` / `act` / `task_start` / `task_done` / `task_fail` / `cancel` 等命令。
@@ -38,20 +48,18 @@
 
 ### 双语 & 元素拾取
 - 支持中英文切换（侧边栏左上角切语言按钮），偏好持久化。
+- 切换按钮的 tooltip 始终用**当前 UI 语言**书写（英文界面写 "Switch to Chinese"，中文界面写 "切换到英文"），不夹杂另一种语言。
 - 提供"元素拾取"模式，可在页面上挑选 DOM 元素并以 `#1: tag` 形式作为附件附在消息中。
+- 元素拾取的视觉反馈与点击附件 tag 后的"高亮闪烁"必须使用**同一个浮层 DIV（页面级单例）**：
+  - 浮层位置以**文档坐标**计算（`getBoundingClientRect + scrollX/Y`，`position:absolute`），页面滚动时浮层会随被高亮元素一起滚动，不再相对视口固定。
+  - 点击附件 tag 触发的高亮动画播完一次（约 2.2s）后浮层必须真正隐藏，不允许出现"消失后又自动显现并永驻"的回闪。再次点击同一附件 tag 应能重新触发动画。
 
 ### 诊断日志
-- 用户可以**一键导出诊断日志**：
+- 用户可以**一键导出会话记录**：
   - Chat 页面 header 提供下载图标按钮，连接成功后随时可点。
-  - Config 页面表单底部也有"导出日志 / 清除日志"两枚按钮，未连接时也可用。
-- 导出文件是单个 `.txt`，包含：
-  1. 当前连接状态（wsConnected / sessionKey / loop status / 最近 step 历史 等）
-  2. 配置（**Token / Device Token 已自动 redact，只保留前 4 位 + 长度**）
-  3. 最近 500 条结构化日志（毫秒级时间戳 + level + 来源 + 信息 + 关键 data）
-  4. 当前 session 的最近 50 条 chat history（包含 user / assistant 完整文本，用于配合日志定位）
-- 日志缓冲区存放在 `chrome.storage.local`，Service Worker 重启后内容仍然在；500 条上限按 ring buffer 滚动，旧的丢弃。
-- "清除日志"按钮会删除内存与磁盘上的全部日志（弹确认框防止误触）。
-- **设计目的**：用户在遇到 bug 时可以一键把日志包发给开发者，避免来回追问"截图 / 你看 console / 这一步发生了什么"。
+  - 导出文件是 `clawtab-session-<时间戳>.jsonl`：第一行是会话元数据 (`{ kind: 'session_meta', sessionKey, agent, browserId, exportedAt }`)，之后每行是一条原始 chat message (`{ kind: 'message', ... }`)。JSONL 方便追加和工具链消化（jq / 数据管道）。
+  - 不再单独提供"清除日志"按钮——该功能已下线。
+  - Config 页面表单底部仍保留"导出 / 导入配置"按钮。
 
 ## 非目标
 - 不内置 Agent 推理能力，所有指令来自远端 Gateway 上的 Agent。

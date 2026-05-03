@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   msgKey,
   isHiddenInfraMsg,
+  isToolResultMsg,
+  isInterSessionEcho,
   extractJsonBlock,
   extractToolCalls,
   isTerminalMsg,
@@ -69,6 +71,45 @@ describe('isHiddenInfraMsg', () => {
   });
   it('does not hide regular user messages', () => {
     expect(isHiddenInfraMsg({ role: 'user', content: 'hello' })).toBe(false);
+  });
+});
+
+describe('isToolResultMsg', () => {
+  it('matches role:"toolResult"', () => {
+    expect(
+      isToolResultMsg({
+        role: 'toolResult',
+        content: [{ type: 'text', text: '{}' }],
+      } as ChatMessage),
+    ).toBe(true);
+  });
+  it('does not match assistant or user', () => {
+    expect(isToolResultMsg({ role: 'assistant', content: 'x' })).toBe(false);
+    expect(isToolResultMsg({ role: 'user', content: 'x' })).toBe(false);
+  });
+});
+
+describe('isInterSessionEcho', () => {
+  it('matches user messages with provenance.kind="inter_session"', () => {
+    expect(
+      isInterSessionEcho({
+        role: 'user',
+        content: 'cmd',
+        provenance: { kind: 'inter_session', sourceTool: 'sessions_send' },
+      }),
+    ).toBe(true);
+  });
+  it('does not match user messages without provenance', () => {
+    expect(isInterSessionEcho({ role: 'user', content: 'hi' })).toBe(false);
+  });
+  it('does not match assistant messages even with provenance set', () => {
+    expect(
+      isInterSessionEcho({
+        role: 'assistant',
+        content: 'x',
+        provenance: { kind: 'inter_session' },
+      }),
+    ).toBe(false);
   });
 });
 
