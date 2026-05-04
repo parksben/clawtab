@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Check,
   Copy,
-  Download,
   Eye,
   EyeOff,
+  FileDown,
+  FileUp,
+  FlaskConical,
   Link as LinkIcon,
-  Upload,
+  Loader2,
 } from 'lucide-react';
 import { IconButton } from './IconButton';
 import { LangBadge } from './LangBadge';
@@ -57,6 +59,7 @@ export function ConfigPage({
   pairingPending,
   pairingDeviceId,
   onToast,
+  onConnect,
 }: {
   lang: Lang;
   onToggleLang: () => void;
@@ -65,18 +68,25 @@ export function ConfigPage({
   pairingPending: boolean;
   pairingDeviceId: string | null;
   onToast: (text: string, error?: boolean) => void;
+  onConnect: (url: string, token: string, name: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState<ConfigDraft>({ url: '', token: '', name: '' });
   const [showToken, setShowToken] = useState(false);
   const [shake, setShake] = useState<'url' | 'token' | null>(null);
   const [copied, setCopied] = useState(false);
+  const [devToolsOn, setDevToolsOn] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadDraft().then(setDraft).catch(() => {});
+    chrome.storage.local
+      .get(['devTools'])
+      .then((r) => setDevToolsOn(!!r.devTools))
+      .catch(() => {});
   }, []);
 
-  const onConnect = async () => {
+  const onConnectClick = async () => {
+    if (connecting) return;
     if (!draft.url.trim()) {
       setShake('url');
       setTimeout(() => setShake(null), 1500);
@@ -97,7 +107,7 @@ export function ConfigPage({
       browserNameDraft: name,
     });
     try {
-      await bg.connect(draft.url.trim(), draft.token.trim(), name);
+      await onConnect(draft.url.trim(), draft.token.trim(), name);
     } catch (e) {
       clog('error', 'connect RPC failed', { error: (e as Error).message });
     }
@@ -267,7 +277,7 @@ export function ConfigPage({
               size="sm"
               onClick={onExport}
             >
-              <Upload size={13} />
+              <FileUp size={13} />
             </IconButton>
             <IconButton
               tooltip={t(lang, 'importConfig')}
@@ -275,7 +285,7 @@ export function ConfigPage({
               size="sm"
               onClick={() => fileRef.current?.click()}
             >
-              <Download size={13} />
+              <FileDown size={13} />
             </IconButton>
             <input
               ref={fileRef}
@@ -355,13 +365,40 @@ export function ConfigPage({
           </span>
         </label>
 
+        <label className="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[12px] text-slate-700">
+          <FlaskConical size={13} className="text-amber-600" />
+          <span className="flex-1">{t(lang, 'devToolsLabel')}</span>
+          <input
+            type="checkbox"
+            checked={devToolsOn}
+            onChange={async (e) => {
+              const v = e.target.checked;
+              setDevToolsOn(v);
+              try {
+                await chrome.storage.local.set({ devTools: v });
+              } catch (err) {
+                clog('warn', 'devTools toggle failed', { error: (err as Error).message });
+              }
+            }}
+            className="h-4 w-4 accent-brand"
+          />
+        </label>
+
         <button
           type="button"
-          onClick={onConnect}
+          onClick={onConnectClick}
           disabled={connecting}
-          className="h-10 w-full rounded-lg bg-brand text-[13px] font-semibold text-white shadow-sm transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-70"
+          aria-busy={connecting}
+          className="flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-brand text-[13px] font-semibold text-white shadow-sm transition hover:bg-brand-hover disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {connecting ? t(lang, 'connecting') : t(lang, 'connect')}
+          {connecting ? (
+            <>
+              <Loader2 size={14} className="animate-spin" />
+              {t(lang, 'connecting')}
+            </>
+          ) : (
+            t(lang, 'connect')
+          )}
         </button>
       </div>
     </div>

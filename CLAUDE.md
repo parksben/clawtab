@@ -107,6 +107,12 @@ These are paid-for in production. Before touching the relevant code, re-read the
 
 23. **New ops must update `executeAct` switch, `describeOp` labels, AND `handleCapabilities`** — Adding a branch to `executeAct` alone is not enough: `describeOp` gives the user-visible "Doing X…" status text (missing branch → "undefined"), and `handleCapabilities` is what agents query to discover features (missing entry → agent never uses the new op). The protocol.ts `ActOp` union is the type-safety anchor — TS will flag a missing branch in `describeOp` / capabilities list if the type is exhaustive, but `executeAct` uses `switch (op)` on a plain string so it won't.
 
+24. **All tab screenshots go through `shrinkScreenshot`** — `chrome.tabs.captureVisibleTab` returns a full-resolution JPEG (~100–200 KB base64). A few perceives over a long task will push the agent past the 1M-token LLM context window (observed: 1.29M tokens → stopReason=error). Every screenshot attached to a `clawtab_result` — perceive, act captureAfter, dev panel — is re-encoded to 1024px longest-edge at JPEG quality 0.42 (~15–30 KB) before shipping. Exception: `screenshot_element` returns a full-tab image + element rect, so the agent can crop client-side — shrinking it would invalidate the rect coordinates.
+
+25. **DevPanel visibility is OR of `import.meta.env.DEV` and `chrome.storage.local['devTools']`** — the Vite flag only flips true when serving from `pnpm dev`. Loaded-unpacked production `dist/` has DEV=false and would hide the panel. The storage toggle in Config page (FlaskConical checkbox) lets developers enable the panel in any build. `useDevToolsEnabled()` in `src/sidebar/hooks/` watches both sources live; storage.onChanged listener means flipping the checkbox updates the ChatPage without reload.
+
+26. **Connect button's loading state requires `CONNECT_STARTED` dispatch** — ConfigPage must call `onConnect(url,token,name)` (from App's `handleConnect`), NOT `bg.connect` directly. App dispatches `CONNECT_STARTED` → `state.connecting=true` → button shows spinner + disabled. Post-connect the `STATUS_UPDATE` reducer case maintains `connecting` while `reconnecting && !gaveUp`, and flips it off on `wsConnected` / `pairingPending` / `gaveUp`. If you see the button clickable after first click, the dispatch path is broken.
+
 ## UI Conventions
 
 - **Two pages**: Config and Chat, derived from the reducer's `state.page` field (driven by `status_update` broadcasts).

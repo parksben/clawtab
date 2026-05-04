@@ -48,7 +48,7 @@ ClawTab detects the block during its polling loop, executes it, and replies with
 
 ### `perceive` — Observe the browser
 
-Captures the active tab's DOM structure and a JPEG screenshot.
+Captures the active tab's metadata, a DOM summary, and a JPEG screenshot (which is re-encoded to ~15–30KB before being attached).
 
 ```json
 {
@@ -59,17 +59,25 @@ Captures the active tab's DOM structure and a JPEG screenshot.
 }
 ```
 
+**`payload.include` fields (optional):** `"title"` · `"url"` · `"dom"` · `"screenshot"` · `"scroll_position"` · `"all"`.
+
+**Default:** `["screenshot", "title", "url", "dom"]`.
+
+ClawTab always shrinks screenshots to a 1024px longest-edge JPEG at quality ~0.42 (`shrinkScreenshot` in the service worker) before attaching them to `clawtab_result`, so the agent's context stays bounded across multi-perceive tasks. If your workflow doesn't need visual info, pass `payload.include = ["title", "url", "dom"]` to save another ~20KB per perceive.
+
 **Result `data`:**
 ```json
 {
   "tabId": 123,
   "url": "https://example.com",
   "title": "Example",
-  "screenshot": "data:image/jpeg;base64,...",
+  "screenshot": "data:image/jpeg;base64,...",   // ~15–30KB shrunk JPEG
   "dom": {
     "title": "Example",
     "url": "https://example.com",
-    "interactive": [ ... ]
+    "simplified": { ... tree capped at depth 3 ... },
+    "interactive": [ ... up to 50 clickable/fillable elements ... ],
+    "metaDescription": "…"
   }
 }
 ```

@@ -325,6 +325,52 @@ Gateway 对 `chat.history` 返回的消息做了 ~12KB 截断；感知截图是 
 
 agent 可以通过 `capabilities` 自查可用 action / op / flag / 当前浏览器状态，不再依赖静态文档。返回数据结构见 `AGENT_PROTOCOL.md`。当我们将来删除或重命名 op 时，agent 能通过比对 `capabilities` 与本地期望优雅降级。
 
+### 截图压缩（`shrinkScreenshot`）
+
+Chrome 的 `chrome.tabs.captureVisibleTab` 按视口原分辨率生成 JPEG，base64 后单张约 100–200 KB。几次 perceive 就能把 agent 上下文推到 1M token 上限触发 `400 prompt is too long`（线上实测 1.29M tokens），agent 的下一条消息直接 stopReason=error + 空 content。
+
+修复：background 顶部 `shrinkScreenshot(raw, maxDim=1024, quality=0.42)` helper：
+
+1. `createImageBitmap(dataURLToBlob(raw))` 拿到 bitmap
+2. 如果最长边 > `maxDim`，按比例缩到 `maxDim`
+3. `OffscreenCanvas` + `drawImage` 重绘到目标尺寸
+4. `canvas.convertToBlob({ type:'image/jpeg', quality: 0.42 })` 重编码
+5. `blobToDataURL` 输出
+
+调用点：
+- `handlePerceive` 拿到原始截图后立刻 shrink；`S.loop.lastScreenshot` 也存 shrink 后版本，TaskBar 缩略图复用
+- `handleAct` 的 `captureAfter` 截图同样 shrink
+- DEV 面板的 `dev_run_act` / `dev_run_perceive` 也走 shrink
+
+单张输出降到 ~15–30 KB，比原来小 ~5x，agent 上下文预算回到可控区。`screenshot_element` 故意**不**走 shrink：它的 payload 是"完整 tab 截图 + 元素 rect"，agent 自己按 rect 坐标裁，缩放会让坐标失效。
+
+失败时 fallback 原图并记 warn log，避免把 perceive 玩坏。
+
+### DevPanel 开关（`import.meta.env.DEV` + storage 双通道）
+
+`import.meta.env.DEV` 只在 `pnpm dev` 跑 Vite 开发服务器时为 true；直接 load-unpacked `dist/` 的生产产物拿到的是 `false`，DevPanel 被 tree-shake 掉。对于希望在任意构建里手动打开面板的开发者，加一条 storage 通道：
+
+- `chrome.storage.local['devTools'] === true` 时也渲染 DevPanel
+- Config 页面底部一个 "Enable developer test panel" checkbox，打勾 = 写 storage，效果即时（storage 监听）
+- 两个来源通过 `useDevToolsEnabled()` hook 汇合：`import.meta.env.DEV || storageOn`
+
+storage 通道带来的副作用只影响 UI 可见性，不影响协议或 bg 行为——DevPanel 本身调用的 `dev_run_act` / `dev_run_perceive` / `dev_capabilities` 在任何构建里 bg 都接收，所以不需要同步 gating。
+
+### 连接按钮的 loading 状态
+
+原来 ConfigPage 直接调 `bg.connect()`，没 dispatch `CONNECT_STARTED` → `state.connecting` 永远不变 true → 按钮没 loading、可以二次点击。
+
+修复：把 bg.connect 抬到 App 层的 `handleConnect`：
+
+```
+handleConnect(url, token, name):
+  dispatch CONNECT_STARTED   // state.connecting=true, 按钮立刻 disabled + spinner
+  try await bg.connect(...)
+  catch: dispatch CONNECT_FAILED  // 回到可点击状态
+```
+
+ConfigPage 新增 `onConnect` prop 调这个 handler。`state.connecting` 后续由 `STATUS_UPDATE` 的 `s.reconnecting && !s.gaveUp` 条件维持，直到 `wsConnected` / `pairingPending` / `gaveUp` 其中一个变 true 才清掉——完整走完 WS 握手才解锁按钮。
+
 ## 链接打开方式
 
 聊天气泡里的 markdown 链接（裸 URL 或 `[text](url)`）通过两层处理保证"点击 = 在新标签打开"：

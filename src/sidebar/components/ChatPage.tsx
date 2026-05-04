@@ -7,6 +7,7 @@ import { TaskBar } from './TaskBar';
 import { MessageList } from './MessageList';
 import { InputArea } from './InputArea';
 import { DevPanel } from './DevPanel';
+import { useDevToolsEnabled } from '../hooks/useDevToolsEnabled';
 import type { Lang } from '../i18n';
 
 export function ChatPage({
@@ -53,6 +54,7 @@ export function ChatPage({
   channelName: string;
 }) {
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const devToolsEnabled = useDevToolsEnabled();
 
   // ESC closes the lightbox
   useEffect(() => {
@@ -78,7 +80,7 @@ export function ChatPage({
         channelName={channelName}
       />
       <TaskBar lang={lang} loop={loop} onThumbClick={setLightbox} />
-      {import.meta.env.DEV ? <DevPanel connected={connected} /> : null}
+      {devToolsEnabled ? <DevPanel connected={connected} /> : null}
       <div className="flex-1 overflow-hidden">
         <MessageList
           lang={lang}

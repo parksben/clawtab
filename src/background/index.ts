@@ -1367,6 +1367,13 @@ async function handlePerceive(
   cmd: Extract<ClawtabCmd, { action: 'perceive' }>,
 ): Promise<void> {
   const { cmdId, payload } = cmd;
+  // Default: give the agent title + url + dom + screenshot. The screenshot
+  // is re-encoded via shrinkScreenshot() before being attached to the
+  // clawtab_result, keeping its on-wire size to ~15–30KB (down from ~150KB
+  // of the raw Chrome JPEG) so the agent's context doesn't blow up over a
+  // multi-perceive task. Agents that want the raw capture can pass
+  // `payload.include = ["all"]` which still goes through the shrinker — we
+  // intentionally never send full-resolution JPEGs over chat.send.
   const include = payload?.include ?? ['screenshot', 'title', 'url', 'dom'];
   const targetTabId =
     payload?.tabId || S.loop.tabId || (await getActiveTabId()) || 0;
@@ -1392,10 +1399,11 @@ async function handlePerceive(
       await chrome.tabs.update(targetTabId, { active: true });
       await new Promise((r) => setTimeout(r, 200));
       try {
-        result.screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        const raw = await chrome.tabs.captureVisibleTab(tab.windowId, {
           format: 'jpeg',
-          quality: 60,
+          quality: 80,
         });
+        result.screenshot = await shrinkScreenshot(raw);
         S.loop.lastScreenshot = result.screenshot as string;
         logEvent('info', 'bg', 'perceive screenshot ok', {
           bytes: (result.screenshot as string | undefined)?.length || 0,
@@ -1517,7 +1525,12 @@ function extractDOM(): Record<string, unknown> {
     children?: SimplifiedNode[];
   }
   function simplify(el: Element | null, depth = 0): SimplifiedNode | null {
-    if (!el || depth > 4) return null;
+    // Depth cap = 3 (was 4). One extra level roughly doubles node count on
+    // large pages; 3 keeps the tree shallow enough that perceive results
+    // stay under ~8KB for typical sites while still surfacing all the
+    // interactive chrome. Pair with the interactive[] array below for
+    // anything the agent actually needs to target.
+    if (!el || depth > 3) return null;
     const tag = el.tagName?.toLowerCase();
     if (!tag || ['script', 'style', 'svg', 'noscript', 'head'].includes(tag)) return null;
     const node: SimplifiedNode = { tag };
@@ -1626,10 +1639,11 @@ async function handleAct(cmd: Extract<ClawtabCmd, { action: 'act' }>): Promise<v
       try {
         await new Promise((r) => setTimeout(r, 400));
         const tab = await chrome.tabs.get(targetTabId);
-        result.screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
+        const raw = await chrome.tabs.captureVisibleTab(tab.windowId, {
           format: 'jpeg',
-          quality: 65,
+          quality: 80,
         });
+        result.screenshot = await shrinkScreenshot(raw);
         S.loop.lastScreenshot = result.screenshot as string;
         result.urlAfter = tab.url;
         result.titleAfter = tab.title;
@@ -2428,6 +2442,55 @@ function blobToDataURL(blob: Blob): Promise<string> {
   });
 }
 
+/**
+ * Re-encode a Chrome `captureVisibleTab` JPEG at a lower resolution + quality
+ * before shipping it to the agent. Chrome's native capture is tied to the tab
+ * viewport (often 1920x1080+), which after base64 is ~150KB per snapshot; a
+ * multi-step agent task with screenshots on each perceive easily crosses the
+ * LLM 1M-token context window. Shrinking to a 1024px longest-edge + quality
+ * 0.42 JPEG gives ~15–30KB on the wire while staying legible for the model.
+ *
+ * If decoding / re-encoding fails for any reason, fall back to the original
+ * data URL rather than breaking perceive — an oversized screenshot is still
+ * better than none.
+ */
+async function shrinkScreenshot(
+  raw: string,
+  maxDim = 1024,
+  quality = 0.42,
+): Promise<string> {
+  try {
+    const img = await createImageBitmap(dataURLToBlob(raw));
+    let w = img.width;
+    let h = img.height;
+    if (Math.max(w, h) > maxDim) {
+      if (w >= h) {
+        h = Math.round((h * maxDim) / w);
+        w = maxDim;
+      } else {
+        w = Math.round((w * maxDim) / h);
+        h = maxDim;
+      }
+    }
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      img.close();
+      return raw;
+    }
+    ctx.drawImage(img, 0, 0, w, h);
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality });
+    img.close();
+    return await blobToDataURL(out);
+  } catch (e) {
+    logEvent('warn', 'bg', 'shrinkScreenshot failed, using raw', {
+      error: (e as Error).message,
+      rawBytes: raw.length,
+    });
+    return raw;
+  }
+}
+
 type SendResultInput = Omit<ClawtabResult, 'type' | 'browserId' | 'ts'>;
 
 async function sendResult(result: SendResultInput): Promise<void> {
@@ -2959,11 +3022,12 @@ chrome.runtime.onMessage.addListener(
             if (msg.captureAfter !== false) {
               try {
                 const t2 = await chrome.tabs.get(tab.id);
+                const raw = await chrome.tabs.captureVisibleTab(t2.windowId, {
+                  format: 'jpeg',
+                  quality: 80,
+                });
                 (data as Record<string, unknown>).screenshot =
-                  await chrome.tabs.captureVisibleTab(t2.windowId, {
-                    format: 'jpeg',
-                    quality: 65,
-                  });
+                  await shrinkScreenshot(raw);
               } catch {
                 /* ignore screenshot failure */
               }
@@ -2988,10 +3052,11 @@ chrome.runtime.onMessage.addListener(
               tabId: tab.id,
             };
             if (include.includes('screenshot') || include.includes('all')) {
-              data.screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
+              const raw = await chrome.tabs.captureVisibleTab(tab.windowId, {
                 format: 'jpeg',
-                quality: 60,
+                quality: 80,
               });
+              data.screenshot = await shrinkScreenshot(raw);
             }
             if (include.includes('dom') || include.includes('all')) {
               const res = await chrome.scripting.executeScript({

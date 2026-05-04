@@ -346,6 +346,21 @@ export function App() {
   const handleToast = (text: string, error?: boolean) =>
     dispatch({ type: 'TOAST', text, error });
 
+  // Called by ConfigPage when the user clicks Connect. Flipping state.connecting
+  // to true synchronously gives the button its spinner + disables double-click.
+  // The subsequent status_update broadcasts (reconnecting=true during WS open)
+  // keep it true until wsConnected, pairingPending, or gaveUp flips it off via
+  // the STATUS_UPDATE reducer case.
+  const handleConnect = async (url: string, token: string, name: string) => {
+    dispatch({ type: 'CONNECT_STARTED' });
+    try {
+      await bg.connect(url, token, name);
+    } catch (e) {
+      dispatch({ type: 'CONNECT_FAILED' });
+      clog('error', 'connect RPC failed', { error: (e as Error).message });
+    }
+  };
+
   const visible = selectVisibleMessages(state);
 
   return (
@@ -382,6 +397,7 @@ export function App() {
           pairingPending={state.pairingPending}
           pairingDeviceId={state.pairingDeviceId}
           onToast={handleToast}
+          onConnect={handleConnect}
         />
       )}
       {state.toast ? (

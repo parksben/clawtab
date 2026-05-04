@@ -58,10 +58,17 @@
 - Shadow DOM 穿透 `pierceShadow: true` — `click` / `fill` / `clear` / `get_text` / `hover` / `scroll_to_element` 在遇到 `shadowRoot` 时递归查找。
 
 ### DEV 测试面板
-- 仅在 `pnpm dev` 跑出来的开发构建里可见（生产 build 会被 tree-shake 掉）。
+- **可见性两路并集**：
+  - `pnpm dev` 开发构建 — Vite 的 `import.meta.env.DEV === true`，自动显示
+  - 任意构建下手动开关 — Config 页面底部 "启用开发者测试面板" 复选框，勾上后写 `chrome.storage.local['devTools']`，Chat 页实时显示
 - 聊天页 TaskBar 下面一个折叠块，默认收起；展开后每个 op 一个按钮，按分组（meta / perceive / tabs / content / navigation / input / eval）列出。
 - 点一下按钮就在当前 active tab 上执行，不经过 `chat.history`——测试调用不污染会话上下文。
 - 结果区显示 ok/error + 耗时 + 截断到 3.5KB 的 JSON；若结果含 `data:image/...` 会自动渲染成缩略图。
+
+### 连接体验
+- 点击"连接"按钮后：按钮立刻进入 loading 状态（禁用 + spinner + "连接中…"文案），防止误点二次触发。
+- 一直保持 loading 直到 WebSocket 握手完成（变 `Chat` 页）或给出失败提示回到可点击态。
+- Config 页面"导入配置 / 导出配置"使用 `FileDown` / `FileUp` 图标与聊天页 header 的"导出会话记录" `Download` 图标作视觉区分。
 
 ### 双语 & 元素拾取
 - 支持中英文切换（侧边栏左上角切语言按钮），偏好持久化。

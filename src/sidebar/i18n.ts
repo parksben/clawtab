@@ -67,6 +67,8 @@ export const STRINGS = {
     clearContextConfirm: 'Clear this conversation and reset the agent context?',
     clearContextFailed: 'Failed to reset context',
 
+    devToolsLabel: 'Enable developer test panel',
+
     // ── Language switch tooltip — written in the CURRENT UI language. ──
     langSwitchTo: 'Switch to Chinese',
   },
@@ -127,6 +129,8 @@ export const STRINGS = {
     clearContext: '新对话（清空上下文）',
     clearContextConfirm: '清空当前对话并重置 Agent 上下文？',
     clearContextFailed: '清空上下文失败',
+
+    devToolsLabel: '启用开发者测试面板',
 
     langSwitchTo: '切换到英文',
   },
